@@ -131,7 +131,7 @@ Los importes públicos son sólo presentación. El precio que cobra Stripe se de
    | Runtime | Node |
    | Branch | `main` |
    | Root directory | dejar vacío (raíz del monorepo) |
-   | Build command | `pnpm install --frozen-lockfile && pnpm --filter vitamate-api build` |
+   | Build command | `pnpm install --frozen-lockfile --prod=false && pnpm --filter vitamate-api build` |
    | Start command | `pnpm --filter vitamate-api start` |
    | Health check path | `/health` |
 
@@ -139,6 +139,8 @@ Los importes públicos son sólo presentación. El precio que cobra Stripe se de
 5. Desplegar. Validar `https://<servicio-render>/health` y esperar `{ "ok": true, "service": "vitamate-api" }`.
 6. Agregar dominio personalizado `api.vitamate.mx` en Render. Copiar **exactamente** el registro DNS que Render indique; no adivinar el destino CNAME.
 7. Esperar HTTPS válido y volver a comprobar `https://api.vitamate.mx/health`.
+
+> Render define `NODE_ENV=production` durante el build y, por ello, pnpm omite las dependencias de desarrollo por defecto. La API necesita `typescript` y `@types/node` para ejecutar su verificación de compilación. El argumento `--prod=false` sólo las instala durante el build; no expone ninguna dependencia al navegador ni modifica las variables de producción del proceso de la API.
 
 ## 4. Crear la PWA en Vercel
 
