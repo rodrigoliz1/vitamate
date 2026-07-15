@@ -85,6 +85,11 @@ Agregar en **Render → Environment**. Las variables marcadas como secretas nunc
 | `BREVO_SENDER_EMAIL` | `noreply@vitamate.mx` | texto |
 | `BREVO_SENDER_NAME` | `VITAMATE` | texto |
 | `REQUIRE_COACH_AUTH` | `true` | texto |
+| `APPLE_BUNDLE_ID` | `mx.vitamate.app` | texto |
+| `APPLE_APP_ID` | ID numérico de App Store Connect; puede omitirse hasta crear la app | texto opcional |
+| `APPLE_PRODUCT_MONTHLY` | `mx.vitamate.premium.monthly` | texto |
+| `APPLE_PRODUCT_ANNUAL` | `mx.vitamate.premium.annual` | texto |
+| `APPLE_ROOT_CERTIFICATES_BASE64` | omitir normalmente; la API obtiene los certificados oficiales | secreto opcional |
 | `PROFECO_QQP_SOURCE_URL` | URL oficial de CSV/paquete QQP, sólo si se automatiza importación | texto opcional |
 | `INEGI_INPC_SOURCE` | `calculator` | texto |
 | `INEGI_INPC_INDICATOR_ID` | `865541` | texto |

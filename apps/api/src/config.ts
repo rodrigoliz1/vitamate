@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const optionalPositiveInteger = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.coerce.number().int().positive().optional(),
+);
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   TRUST_PROXY: z.enum(['true', 'false']).default(process.env.NODE_ENV === 'production' ? 'true' : 'false').transform((value) => value === 'true'),
@@ -24,7 +29,9 @@ const schema = z.object({
   STRIPE_PRICE_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ANNUAL: z.string().optional(),
   APPLE_BUNDLE_ID: z.string().default('mx.vitamate.app'),
-  APPLE_APP_ID: z.coerce.number().int().positive().optional(),
+  // Render represents environment variables configured without a value as an
+  // empty string. Treat it as unset until App Store Connect assigns the app ID.
+  APPLE_APP_ID: optionalPositiveInteger,
   APPLE_ROOT_CERTIFICATES_BASE64: z.string().optional(),
   APPLE_PRODUCT_MONTHLY: z.string().default('mx.vitamate.premium.monthly'),
   APPLE_PRODUCT_ANNUAL: z.string().default('mx.vitamate.premium.annual'),
