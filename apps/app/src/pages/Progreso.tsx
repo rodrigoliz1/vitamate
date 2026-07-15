@@ -1,11 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { IonButton, IonContent, IonIcon, IonModal, IonPage, IonSpinner, IonToast } from '@ionic/react';
-import { analyticsOutline, cloudDoneOutline, cloudOfflineOutline, logOutOutline, mailOutline, moonOutline, refreshOutline, scaleOutline, sunnyOutline, syncOutline, trendingDownOutline, trendingUpOutline } from 'ionicons/icons';
+import { analyticsOutline, cloudDoneOutline, cloudOfflineOutline, heartOutline, logOutOutline, mailOutline, moonOutline, refreshOutline, scaleOutline, sunnyOutline, syncOutline, trendingDownOutline, trendingUpOutline, walkOutline } from 'ionicons/icons';
 import { sessionsThisWeek, type UserProfile } from '@vitamate/domain';
 import { BrandMark } from '../components/BrandMark';
 import { ProfileEditor } from '../components/ProfileEditor';
 import { resolveUiLocale, type ColorTheme } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
+import type { NativeHealthSummary } from '../services/nativeHealth';
 
 interface Props {
   snapshot: VitamateSnapshot;
@@ -14,12 +15,13 @@ interface Props {
   theme: ColorTheme;
   onSetTheme(theme: ColorTheme): void;
   cloud: { configured: boolean; email: string | null; busy: boolean; message: string };
+  health: { supported: boolean; summary: NativeHealthSummary | null; busy: boolean; message: string; connect(): Promise<NativeHealthSummary>; refresh(): Promise<NativeHealthSummary> };
   onRequestMagicLink(email: string): Promise<void>;
   onSyncCloud(): Promise<void>;
   onSignOutCloud(): Promise<void>;
 }
 
-const Progreso = ({ snapshot, onAddWeight, onUpdateProfile, theme, onSetTheme, cloud, onRequestMagicLink, onSyncCloud, onSignOutCloud }: Props) => {
+const Progreso = ({ snapshot, onAddWeight, onUpdateProfile, theme, onSetTheme, health, cloud, onRequestMagicLink, onSyncCloud, onSignOutCloud }: Props) => {
   const [weight, setWeight] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -40,7 +42,7 @@ const Progreso = ({ snapshot, onAddWeight, onUpdateProfile, theme, onSetTheme, c
     try { await onRequestMagicLink(email.trim()); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'No pudimos enviar el enlace.'); }
   };
-  const runCloud = async (action: () => Promise<void>) => {
+  const runCloud = async (action: () => Promise<unknown>) => {
     try { await action(); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'No pudimos completar la sincronización.'); }
   };
@@ -51,6 +53,7 @@ const Progreso = ({ snapshot, onAddWeight, onUpdateProfile, theme, onSetTheme, c
     <section className="stats-grid"><article><span><IonIcon icon={scaleOutline} /></span><small>Peso actual</small><strong>{entries[0]?.weightKg.toFixed(1) ?? '—'} <b>kg</b></strong></article><article><span><IonIcon icon={change <= 0 ? trendingDownOutline : trendingUpOutline} /></span><small>Cambio total</small><strong>{change > 0 ? '+' : ''}{change.toFixed(1)} <b>kg</b></strong></article><article><span><IonIcon icon={analyticsOutline} /></span><small>Sesiones esta semana</small><strong>{weekly.length}</strong></article></section>
     <div className="progress-layout"><section className="weight-form-card"><h2>Registrar peso</h2><p>Procura medirlo en condiciones parecidas para una tendencia más útil.</p><form onSubmit={submitWeight}><label className="field"><span>Peso en kilogramos</span><input type="number" min="30" max="350" step="0.1" inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} placeholder={entries[0]?.weightKg.toFixed(1) ?? '70.0'} /></label><IonButton type="submit" expand="block" className="primary-button">Guardar medición</IonButton></form><section className="appearance-setting" aria-labelledby="appearance-title"><h2 id="appearance-title">Apariencia</h2><p>Elige cómo quieres ver VITAMATE en este dispositivo.</p><div role="group" aria-label="Tema de la interfaz"><button type="button" className={theme === 'light' ? 'is-active' : ''} aria-pressed={theme === 'light'} onClick={() => onSetTheme('light')}><IonIcon icon={sunnyOutline} /><span><strong>Claro</strong><small>Fondo luminoso</small></span></button><button type="button" className={theme === 'dark' ? 'is-active' : ''} aria-pressed={theme === 'dark'} onClick={() => onSetTheme('dark')}><IonIcon icon={moonOutline} /><span><strong>Oscuro</strong><small>Menos brillo</small></span></button></div></section></section><section className="weight-history"><h2>Mediciones recientes</h2>{entries.slice(0, 8).map((entry, index) => <article key={entry.id}><span>{new Intl.DateTimeFormat(resolveUiLocale(snapshot.profile?.locale ?? 'es-MX'), { day: 'numeric', month: 'short' }).format(new Date(entry.recordedAt))}</span><strong>{entry.weightKg.toFixed(1)} kg</strong>{index < entries.length - 1 ? <small>{(entry.weightKg - entries[index + 1].weightKg).toFixed(1)} kg</small> : <small>Inicio</small>}</article>)}</section></div>
     <section className="profile-retake-card"><div><p className="eyebrow">Metas y preferencias</p><h2>Tu plan cambia contigo</h2><p>Modifica tu objetivo, actividad, comidas, gustos, alergias, tiempo de cocina o estilo de VITACOACH. Recalcularemos tus planes al guardar.</p></div><IonButton fill="outline" onClick={() => setEditingProfile(true)}><IonIcon slot="start" icon={refreshOutline} />Volver a tomar el quiz</IonButton></section>
+    {health.supported && <section className="healthkit-card"><header><span><IonIcon icon={heartOutline} /></span><div><p className="eyebrow">Apple Health</p><h2>{health.summary ? 'Tu actividad, con más contexto' : 'Conecta tu actividad de iPhone'}</h2></div></header>{health.summary ? <div className="healthkit-stats"><article><IonIcon icon={walkOutline} /><small>Pasos hoy</small><strong>{health.summary.stepsToday?.toLocaleString('es-MX') ?? '—'}</strong></article><article><IonIcon icon={analyticsOutline} /><small>Calorías activas</small><strong>{health.summary.activeCaloriesToday ?? '—'} <b>kcal</b></strong></article><article><IonIcon icon={heartOutline} /><small>Frecuencia en reposo</small><strong>{health.summary.restingHeartRate ?? '—'} <b>lpm</b></strong></article></div> : <p>VITAMATE solicitará permiso granular. Nunca vende estos datos ni lee información que no autorices.</p>}<IonButton fill={health.summary ? 'outline' : 'solid'} className={health.summary ? undefined : 'primary-button'} disabled={health.busy} onClick={() => runCloud(health.summary ? health.refresh : health.connect)}>{health.busy ? <IonSpinner /> : <><IonIcon slot="start" icon={health.summary ? syncOutline : heartOutline} />{health.summary ? 'Actualizar actividad' : 'Conectar Apple Health'}</>}</IonButton>{health.message && <p className="cloud-message">{health.message}</p>}</section>}
     <section className="cloud-card"><header><span><IonIcon icon={cloud.email ? cloudDoneOutline : cloudOfflineOutline} /></span><div><p className="eyebrow">Cuenta y respaldo</p><h2>{cloud.email ? 'Tus datos pueden sincronizarse' : 'Protege tu historial en la nube'}</h2></div></header>{!cloud.configured ? <div className="cloud-warning"><strong>Configuración pendiente</strong><p>Falta la clave publicable de Supabase en la PWA. Ningún secreto debe colocarse en el frontend.</p></div> : cloud.email ? <div className="cloud-session"><p>Sesión iniciada como <strong>{cloud.email}</strong>.</p><div><IonButton className="primary-button" disabled={cloud.busy} onClick={() => runCloud(onSyncCloud)}>{cloud.busy ? <IonSpinner /> : <><IonIcon slot="start" icon={syncOutline} />Sincronizar ahora</>}</IonButton><IonButton fill="clear" color="medium" disabled={cloud.busy} onClick={() => runCloud(onSignOutCloud)}><IonIcon slot="start" icon={logOutOutline} />Cerrar sesión</IonButton></div></div> : <form className="cloud-login" onSubmit={submitEmail}><p>Recibirás un enlace seguro por correo; no necesitas contraseña.</p><label className="field"><span>Correo electrónico</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label><IonButton type="submit" className="primary-button" disabled={cloud.busy}>{cloud.busy ? <IonSpinner /> : <><IonIcon slot="start" icon={mailOutline} />Enviar enlace mágico</>}</IonButton></form>}{cloud.message && <p className="cloud-message">{cloud.message}</p>}</section>
   </main></IonContent><IonModal isOpen={editingProfile} onDidDismiss={() => setEditingProfile(false)}>{snapshot.profile && <ProfileEditor profile={snapshot.profile} onSave={(profile) => { onUpdateProfile(profile); setMessage('Perfil actualizado y planes recalculados.'); }} onClose={() => setEditingProfile(false)} />}</IonModal><IonToast isOpen={Boolean(message)} message={message} duration={3000} onDidDismiss={() => setMessage('')} /></IonPage>;
 };

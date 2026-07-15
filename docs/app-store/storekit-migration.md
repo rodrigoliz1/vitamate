@@ -1,67 +1,51 @@
-# StoreKit Migration Plan
+# StoreKit para VITAMATE iOS
 
-## Estado Actual (MVP PWA)
-Las suscripciones se manejan exclusivamente mediante **Stripe Checkout** en la web.
-- Flujo: Cliente → Backend → Stripe Checkout Session → Pago → Webhook → Entitlements.
-- Los permisos se almacenan en la tabla `entitlements` con `source = 'stripe'`.
+## Implementación terminada en código
 
-## Objetivo de la Migración
-Cuando la app se publique en la App Store, Apple requiere que las compras in-app (IAP) se realicen mediante StoreKit. La arquitectura de adaptadores (`BillingProvider`) permite esta transición sin modificar la lógica de UI.
+- iOS usa `@capgo/native-purchases`; web/PWA conserva Stripe.
+- Productos esperados:
+  - `mx.vitamate.premium.monthly`
+  - `mx.vitamate.premium.annual`
+- La interfaz toma precio, moneda y oferta introductoria directamente de StoreKit.
+- Compra y restauración envían `appAccountToken` con el UUID de Supabase.
+- La API verifica el JWS con `@apple/app-store-server-library` y certificados raíz oficiales de Apple.
+- La transacción original queda ligada a una sola cuenta VITAMATE.
+- Las notificaciones V2 de App Store actualizan el mismo entitlement utilizado por Stripe.
+- La tabla de deduplicación vuelve idempotente el webhook de Apple.
+- Dentro de iOS no se ofrece Checkout de Stripe para compras nuevas.
 
-## Arquitectura del Adaptador
+## Estado externo pendiente
 
-```typescript
-// Implementación web actual
-class StripeWebBillingProvider implements BillingProvider {
-  async getOfferings(): Promise<BillingOffering[]> { /* Stripe prices */ }
-  async purchase(productId: string): Promise<PurchaseResult> { /* Checkout Session */ }
-  async restorePurchases(): Promise<RestoreResult> { /* Stripe Customer Portal */ }
-  async openManagementPortal(): Promise<void> { /* Stripe Portal */ }
-}
+El propietario debe crear en App Store Connect el grupo **VITAMATE Premium**, ambos productos y, si se desea, la prueba introductoria única de siete días. Los Product ID deben coincidir exactamente con los anteriores.
 
-// Implementación futura iOS
-class StoreKitBillingProvider implements BillingProvider {
-  async getOfferings(): Promise<BillingOffering[]> { /* StoreKit 2 products */ }
-  async purchase(productId: string): Promise<PurchaseResult> { /* StoreKit 2 purchase */ }
-  async restorePurchases(): Promise<RestoreResult> { /* AppStore.sync() */ }
-  async openManagementPortal(): Promise<void> { /* Abrir settings de suscripción */ }
-}
-```
+Configurar la URL de notificaciones:
 
-## Plan de Implementación
+`https://api.vitamate.mx/v1/billing/apple/notifications`
 
-### Fase 1: Configuración en App Store Connect
-1. Crear productos de suscripción:
-   - `mx.vitamate.premium.monthly` — VITAMATE Premium Mensual
-   - `mx.vitamate.premium.annual` — VITAMATE Premium Anual
-2. Configurar grupo de suscripciones.
-3. Configurar Server-to-Server Notifications V2.
+Variables de la API:
 
-### Fase 2: Implementación del Plugin Capacitor
-1. Implementar o adoptar un plugin de StoreKit 2 para Capacitor.
-2. El plugin debe soportar: `getProducts`, `purchase`, `restorePurchases`, `listenForTransactions`.
-3. Verificación de recibos en el backend mediante App Store Server API.
-
-### Fase 3: Sincronización de Entitlements
-- Cuando un usuario paga por StoreKit, el backend recibe la notificación S2S.
-- Se actualiza la tabla `entitlements` con `source = 'apple'`.
-- La misma tabla `entitlements` sirve para ambos proveedores.
-- Un usuario que migre de web a iOS conserva su suscripción activa hasta que expire y renueva por el canal nativo.
-
-### Fase 4: Pruebas en Sandbox
-- Crear cuentas de sandbox en App Store Connect.
-- Probar: compra, renovación, cancelación, expiración, restauración.
-- Verificar que los webhooks S2S lleguen y se procesen idempotentemente.
-
-## Variables de Entorno Adicionales
-```bash
-APPLE_SHARED_SECRET=
-APPLE_S2S_NOTIFICATION_URL=
+```dotenv
 APPLE_BUNDLE_ID=mx.vitamate.app
+APPLE_APP_ID=ID_NUMERICO_DE_APP_STORE_CONNECT
+APPLE_PRODUCT_MONTHLY=mx.vitamate.premium.monthly
+APPLE_PRODUCT_ANNUAL=mx.vitamate.premium.annual
+APPLE_ROOT_CERTIFICATES_BASE64=
 ```
 
-## Consideraciones
-- Apple cobra 30% (primer año) / 15% (Small Business Program) de comisión.
-- Los precios en la App Store se configuran por tier, no por monto exacto.
-- El usuario debe poder restaurar compras desde la pantalla de suscripción.
-- Mostrar términos de suscripción antes del pago (requerido por Apple).
+`APPLE_ROOT_CERTIFICATES_BASE64` es opcional: si está vacío, la API obtiene y cachea los certificados desde la PKI oficial de Apple. En una red de producción sin salida a internet, cargar los certificados DER en base64 separados por comas.
+
+## Base de datos
+
+Aplicar `supabase/migrations/202607140012_apple_storekit.sql`. La migración añade proveedor, IDs de Apple, entorno, transacciones y deduplicación de notificaciones sin duplicar el modelo de permisos.
+
+## Matriz de prueba Sandbox/TestFlight
+
+- Compra mensual con prueba disponible.
+- Compra anual con prueba disponible.
+- Segundo intento en la misma cuenta sin nueva prueba.
+- Restaurar compra después de reinstalar.
+- Cancelar renovación y conservar acceso hasta el vencimiento.
+- Vencimiento, reembolso/revocación y reactivación.
+- Notificación duplicada sin duplicar cambios.
+- Intento de ligar una compra a otra cuenta VITAMATE rechazado.
+- Suscriptor web que inicia sesión en iOS conserva acceso, sin enlaces externos de compra.

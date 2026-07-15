@@ -39,7 +39,27 @@ BREVO_SENDER_EMAIL=noreply@vitamate.mx
 
 VITAMATE usa la API transaccional de Brevo para enviar su correo de acceso con código OTP de seis dígitos. Supabase genera y verifica el token, pero la plantilla y la entrega las controla el backend de VITAMATE. Como respaldo para correos propios de Supabase Auth, configura su SMTP personalizado con `smtp-relay.brevo.com`, puerto 587, el usuario SMTP de Brevo y la **SMTP key** (no la API key).
 
-## 3. OpenAI Realtime sobre WebRTC
+## 3. App Store / StoreKit
+
+Las compras nuevas dentro de iOS usan StoreKit y nunca Stripe Checkout. Crea en App Store Connect el grupo **VITAMATE Premium**, los productos `mx.vitamate.premium.monthly` y `mx.vitamate.premium.annual`, y la prueba introductoria de siete días si corresponde. Registra como App Store Server Notifications V2:
+
+```text
+https://api.vitamate.mx/v1/billing/apple/notifications
+```
+
+Configura en Render:
+
+```dotenv
+APPLE_BUNDLE_ID=mx.vitamate.app
+APPLE_APP_ID=ID_NUMERICO_DE_APP_STORE_CONNECT
+APPLE_PRODUCT_MONTHLY=mx.vitamate.premium.monthly
+APPLE_PRODUCT_ANNUAL=mx.vitamate.premium.annual
+APPLE_ROOT_CERTIFICATES_BASE64=
+```
+
+Aplica `202607140012_apple_storekit.sql`. El último valor es opcional mientras Render pueda descargar los certificados oficiales de Apple al iniciar la verificación.
+
+## 4. OpenAI Realtime sobre WebRTC
 
 La implementación ya está conectada así:
 
@@ -58,7 +78,7 @@ OPENAI_REALTIME_VOICE=marin
 
 Para probar: inicia API y PWA, abre **VITACOACH → Llamar** y concede micrófono. La llamada comienza automáticamente. Todos los endpoints de VITACOACH exigen una sesión válida y un entitlement Premium; `REQUIRE_COACH_AUTH=true` se conserva además como configuración explícita de producción.
 
-## 4. Despliegue de base de datos
+## 5. Despliegue de base de datos
 
 Desde la raíz del proyecto:
 
@@ -67,7 +87,7 @@ corepack pnpm dlx supabase link --project-ref wxezdboreybgxdlivoeo
 corepack pnpm dlx supabase db push
 ```
 
-Las migraciones `202607140010_billing_entitlements.sql` y `202607140011_persistent_rate_limits.sql` añaden clientes de Stripe, entitlements, deduplicación de webhooks y límites persistentes con RLS. Las migraciones previas añaden planes, memoria, precios y entrenamiento progresivo.
+Las migraciones `202607140010_billing_entitlements.sql`, `202607140011_persistent_rate_limits.sql` y `202607140012_apple_storekit.sql` añaden clientes, entitlements Stripe/Apple, deduplicación de webhooks y límites persistentes con RLS. Las migraciones previas añaden planes, memoria, precios y entrenamiento progresivo.
 
 En producción configura también:
 
@@ -77,12 +97,12 @@ TRUST_PROXY=true
 REQUIRE_COACH_AUTH=true
 ```
 
-## 5. Verificación local de Stripe
+## 6. Verificación local de Stripe
 
 En otra terminal, con la API en el puerto 3001:
 
 ```bash
-stripe listen --forward-to http://'http://127.0.0.1:3001'/v1/billing/webhook
+stripe listen --forward-to http://127.0.0.1:3001/v1/billing/webhook
 ```
 
 Coloca temporalmente el `whsec_...` que imprime la CLI en `STRIPE_WEBHOOK_SECRET`, reinicia la API y completa Checkout con una cuenta de prueba. Verifica alta, renovación, cancelación, pago fallido y reactivación desde Stripe. El frontend nunca concede Premium por el parámetro `checkout=success`; sólo consulta el entitlement proyectado por el webhook.

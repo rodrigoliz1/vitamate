@@ -110,7 +110,7 @@ const App: React.FC = () => {
   if (!actions.cloud.email) return <IonApp><AuthGate busy={actions.cloud.busy} message={actions.cloud.message} onRegister={actions.registerWithPassword} onSignIn={actions.signInWithPassword} onRequestPasswordRecovery={actions.requestPasswordRecovery} onResetPassword={actions.resetPasswordWithOtp} onVerify={actions.verifyOtp} /></IonApp>;
   if (!actions.cloud.snapshotReady) return <IonApp />;
   if (!snapshot.profile) return <IonApp><Onboarding onComplete={actions.completeOnboarding} /></IonApp>;
-  if (!snapshot.planSelectionCompleted) return <IonApp><PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} onComplete={actions.completePlanSelection} /></IonApp>;
+  if (!snapshot.planSelectionCompleted) return <IonApp><PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} native={actions.billing.native} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onComplete={actions.completePlanSelection} /></IonApp>;
   const english = resolveUiLocale(snapshot.profile.locale) === 'en-US';
   const premium = actions.billing.isPremium;
   const requirePremium = () => setSubscriptionOpen(true);
@@ -125,9 +125,9 @@ const App: React.FC = () => {
             <Route exact path="/nutricion" render={() => <Nutricion snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onSavePersonalFood={actions.savePersonalFood} onDeletePersonalFood={actions.deletePersonalFood} onSelectMealPlanOption={actions.selectMealPlanOption} />} />
             <Route exact path="/plan-semanal" render={() => gated('Plan alimenticio y lista semanal del súper', <PlanSemanal snapshot={snapshot} onUpdateProfile={actions.updateProfile} onSelectMealPlanOption={actions.selectMealPlanOption} />)} />
             <Route exact path="/entrenar" render={() => gated('Entrenamientos personalizados y progresivos', <Entrenar snapshot={snapshot} onCompleteWorkout={actions.completeGuidedWorkout} />)} />
-            <Route exact path="/coach" render={() => gated('VITACOACH por chat y llamada', <Coach snapshot={snapshot} onAppendMessages={actions.appendCoachMessages} onMergeMessages={actions.mergeCoachMessages} onApplyMemoryUpdates={actions.applyCoachMemoryUpdates} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onAddManualWorkout={actions.addManualWorkout} onDeleteWorkout={actions.deleteWorkoutSession} onAddHealthDocument={actions.addHealthDocument} onReplaceMealPlanOption={actions.replaceMealPlanOption} onReplaceMealPlanIngredient={actions.replaceMealPlanIngredient} />)} />
-            <Route exact path="/progreso" render={() => gated('Progreso, metas y personalización', <Progreso snapshot={snapshot} onAddWeight={actions.addWeight} onUpdateProfile={actions.updateProfile} theme={theme} onSetTheme={setTheme} cloud={actions.cloud} onRequestMagicLink={actions.requestMagicLink} onSyncCloud={actions.syncCloud} onSignOutCloud={actions.signOutCloud} />)} />
-            <Route exact path="/cuenta" render={() => <Cuenta snapshot={snapshot} cloudEmail={actions.cloud.email} entitlement={actions.billing.entitlement} onOpenSubscription={requirePremium} />} />
+            <Route exact path="/coach" render={() => gated('VITACOACH por chat y llamada', <Coach snapshot={snapshot} healthSummary={actions.health.summary ?? undefined} onAppendMessages={actions.appendCoachMessages} onMergeMessages={actions.mergeCoachMessages} onApplyMemoryUpdates={actions.applyCoachMemoryUpdates} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onAddManualWorkout={actions.addManualWorkout} onDeleteWorkout={actions.deleteWorkoutSession} onAddHealthDocument={actions.addHealthDocument} onReplaceMealPlanOption={actions.replaceMealPlanOption} onReplaceMealPlanIngredient={actions.replaceMealPlanIngredient} />)} />
+            <Route exact path="/progreso" render={() => gated('Progreso, metas y personalización', <Progreso snapshot={snapshot} onAddWeight={actions.addWeight} onUpdateProfile={actions.updateProfile} theme={theme} onSetTheme={setTheme} health={actions.health} cloud={actions.cloud} onRequestMagicLink={actions.requestMagicLink} onSyncCloud={actions.syncCloud} onSignOutCloud={actions.signOutCloud} />)} />
+            <Route exact path="/cuenta" render={() => <Cuenta snapshot={snapshot} cloudEmail={actions.cloud.email} entitlement={actions.billing.entitlement} onOpenSubscription={requirePremium} onDeleteAccount={actions.deleteAccount} />} />
             <Route exact path="/"><Redirect to="/hoy" /></Route>
           </IonRouterOutlet>
           <IonTabBar slot="bottom" className="app-tab-bar">
@@ -138,7 +138,7 @@ const App: React.FC = () => {
             <IonTabButton tab="progreso" href={premium ? '/progreso' : undefined} onClick={premium ? undefined : requirePremium}><IonIcon icon={trendingUp} /><IonLabel>{english ? 'Progress' : 'Progreso'}</IonLabel>{!premium && <IonIcon className="tab-lock" icon={lockClosed} />}</IonTabButton>
           </IonTabBar>
         </IonTabs>
-        <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} onLeavingForCheckout={actions.completePlanSelection} />
+        <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} native={actions.billing.native} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onLeavingForCheckout={actions.completePlanSelection} />
         {celebration && <SubscriptionCelebration entitlement={celebration} isOpen onDismiss={() => setCelebration(null)} />}
       </IonReactRouter>
     </IonApp>

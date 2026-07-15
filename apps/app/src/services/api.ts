@@ -47,6 +47,9 @@ export async function requestPasswordReset(email: string): Promise<{ sent: true;
 export async function requestAuthOtp(input: { email: string; fullName: string; preferredName: string }): Promise<{ sent: true; verificationType: OtpVerificationType; delivery: OtpDelivery }> {
   return request('/v1/auth/request-otp', { method: 'POST', body: JSON.stringify(input) });
 }
+export function deleteAccount(): Promise<{ deleted: true }> {
+  return request('/v1/auth/account', { method: 'DELETE' });
+}
 
 export interface BillingEntitlement {
   userId: string;
@@ -58,9 +61,11 @@ export interface BillingEntitlement {
   trialUsed: boolean;
   cancelAtPeriodEnd: boolean;
   stripeCustomerId: string | null;
+  source?: 'none' | 'stripe' | 'apple';
+  appleProductId?: string | null;
 }
 
-export interface BillingOffer { interval: 'month' | 'year'; amount: number; currency: string }
+export interface BillingOffer { interval: 'month' | 'year'; amount: number; currency: string; displayPrice?: string; trialAvailable?: boolean }
 export function fetchBillingStatus(): Promise<{ entitlement: BillingEntitlement; configured: boolean; offers: BillingOffer[] }> {
   return request('/v1/billing/status');
 }
@@ -75,6 +80,10 @@ export async function createCheckout(interval: 'month' | 'year', returnUrl: stri
 
 export async function createBillingPortal(returnUrl: string): Promise<{ url: string }> {
   return request('/v1/billing/portal', { method: 'POST', body: JSON.stringify({ returnUrl }) });
+}
+
+export function verifyApplePurchase(input: { transactionId: string; jwsRepresentation: string }): Promise<{ entitlement: BillingEntitlement }> {
+  return request('/v1/billing/apple/verify', { method: 'POST', body: JSON.stringify(input) });
 }
 
 export async function searchFoods(query: string, external = false): Promise<FoodCatalogItem[]> {

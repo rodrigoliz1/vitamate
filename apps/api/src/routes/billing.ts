@@ -4,15 +4,20 @@ import { z } from 'zod';
 import { config, isLocalDevelopmentOrigin } from '../config.js';
 import {
   claimWebhookEvent,
+  claimAppleWebhookEvent,
   customerIdForUser,
   getEntitlement,
   isPremium,
   releaseWebhookEvent,
+  releaseAppleWebhookEvent,
   saveCustomer,
   upsertSubscription,
+  upsertAppleSubscription,
   userIdForCustomer,
+  userIdForAppleOriginalTransaction,
   type BillingStatus,
 } from '../repositories/billingRepository.js';
+import { appleInterval, verifyAppleNotification, verifyAppleRenewalInfo, verifyAppleTransaction } from '../services/appleStore.js';
 import { requireUser } from '../services/auth.js';
 import { requireSupabase } from '../services/supabase.js';
 
@@ -77,6 +82,49 @@ async function activeStripeSubscriptionForCustomer(customer: string): Promise<St
     .sort((a, b) => b.created - a.created)[0] ?? null;
 }
 
+async function projectAppleTransaction(
+  transaction: Awaited<ReturnType<typeof verifyAppleTransaction>>,
+  expectedUserId?: string,
+  renewal?: Awaited<ReturnType<typeof verifyAppleRenewalInfo>>,
+): Promise<string> {
+  const interval = appleInterval(transaction.productId);
+  if (!interval || !transaction.originalTransactionId || !transaction.transactionId || !transaction.expiresDate) {
+    throw Object.assign(new Error('La transacción no corresponde a un producto VITAMATE Premium.'), { statusCode: 400, code: 'INVALID_APPLE_PRODUCT' });
+  }
+  const mappedUserId = await userIdForAppleOriginalTransaction(transaction.originalTransactionId);
+  const userId = expectedUserId ?? mappedUserId ?? transaction.appAccountToken;
+  if (!userId) {
+    throw Object.assign(new Error('La compra no corresponde a esta cuenta VITAMATE.'), { statusCode: 403, code: 'APPLE_ACCOUNT_MISMATCH' });
+  }
+  if (expectedUserId && transaction.appAccountToken && transaction.appAccountToken !== expectedUserId) {
+    // Al borrar una cuenta Apple no cancela automáticamente su suscripción.
+    // Permitimos restaurarla en una cuenta nueva sólo si el UUID original ya
+    // no existe; una cuenta activa conserva la exclusividad de la compra.
+    const { data: originalAccount } = await requireSupabase().auth.admin.getUserById(transaction.appAccountToken);
+    if (originalAccount.user) {
+      throw Object.assign(new Error('La compra no corresponde a esta cuenta VITAMATE.'), { statusCode: 403, code: 'APPLE_ACCOUNT_MISMATCH' });
+    }
+  }
+  if (mappedUserId && mappedUserId !== userId) {
+    throw Object.assign(new Error('Esta compra ya está vinculada a otra cuenta VITAMATE.'), { statusCode: 409, code: 'APPLE_PURCHASE_ALREADY_LINKED' });
+  }
+  const accessEnd = Math.max(transaction.expiresDate, renewal?.gracePeriodExpiresDate ?? 0);
+  const active = !transaction.revocationDate && !transaction.isUpgraded && accessEnd > Date.now();
+  await upsertAppleSubscription({
+    userId,
+    originalTransactionId: transaction.originalTransactionId,
+    transactionId: transaction.transactionId,
+    productId: transaction.productId!,
+    environment: String(transaction.environment ?? 'Unknown'),
+    billingInterval: interval,
+    currentPeriodEnd: new Date(accessEnd).toISOString(),
+    active,
+    trialUsed: transaction.offerType === 1 || renewal?.offerType === 1,
+    cancelAtPeriodEnd: renewal?.autoRenewStatus === 0,
+  });
+  return userId;
+}
+
 function checkoutReturnUrl(value: string | undefined): string {
   const fallback = new URL(config.PUBLIC_APP_URL);
   if (!value) return fallback.origin;
@@ -104,7 +152,7 @@ export async function billingRoutes(app: FastifyInstance) {
     // Checkout o una entrega retrasada no debe dejar a una compra válida sin
     // acceso. Reconciliamos sólo estados no Premium con Stripe y guardamos el
     // resultado antes de responder.
-    if (configured && !(entitlement.plan === 'premium' && ['trialing', 'active'].includes(entitlement.status))) {
+    if (configured && entitlement.source !== 'apple' && !(entitlement.plan === 'premium' && ['trialing', 'active'].includes(entitlement.status))) {
       try {
         const customer = await customerIdForUser(userId);
         if (customer) {
@@ -193,6 +241,38 @@ export async function billingRoutes(app: FastifyInstance) {
     if (!customer) throw Object.assign(new Error('Aún no tienes una cuenta de facturación.'), { statusCode: 404 });
     const session = await requireStripe().billingPortal.sessions.create({ customer, return_url: `${checkoutReturnUrl(returnUrl)}/cuenta` });
     return { url: session.url };
+  });
+
+  app.post('/v1/billing/apple/verify', async (request) => {
+    const { userId } = await requireUser(request);
+    const input = z.object({ transactionId: z.string().min(8).max(100), jwsRepresentation: z.string().min(100).max(100_000) }).parse(request.body);
+    const transaction = await verifyAppleTransaction(input.jwsRepresentation);
+    if (transaction.transactionId !== input.transactionId) {
+      throw Object.assign(new Error('El identificador de compra no coincide con la transacción firmada.'), { statusCode: 400, code: 'APPLE_TRANSACTION_MISMATCH' });
+    }
+    await projectAppleTransaction(transaction, userId);
+    return { entitlement: await getEntitlement(userId) };
+  });
+
+  app.post('/v1/billing/apple/notifications', async (request, reply) => {
+    const { signedPayload } = z.object({ signedPayload: z.string().min(100).max(200_000) }).parse(request.body);
+    const notification = await verifyAppleNotification(signedPayload);
+    if (!notification.notificationUUID) return reply.code(400).send({ code: 'APPLE_NOTIFICATION_MISSING_ID' });
+    if (!await claimAppleWebhookEvent(notification.notificationUUID, String(notification.notificationType ?? 'UNKNOWN'))) return { received: true, duplicate: true };
+    try {
+      if (notification.data?.signedTransactionInfo) {
+        const transaction = await verifyAppleTransaction(notification.data.signedTransactionInfo);
+        const renewal = notification.data.signedRenewalInfo
+          ? await verifyAppleRenewalInfo(notification.data.signedRenewalInfo)
+          : undefined;
+        const owner = transaction.originalTransactionId ? await userIdForAppleOriginalTransaction(transaction.originalTransactionId) : null;
+        if (owner || transaction.appAccountToken) await projectAppleTransaction(transaction, owner ?? transaction.appAccountToken, renewal);
+      }
+    } catch (error) {
+      await releaseAppleWebhookEvent(notification.notificationUUID);
+      throw error;
+    }
+    return { received: true };
   });
 
   app.post('/v1/billing/webhook', { config: { rawBody: true } }, async (request: FastifyRequest, reply) => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { IonButton, IonIcon } from '@ionic/react';
 import { cameraOutline, stopCircleOutline } from 'ionicons/icons';
 
@@ -10,7 +11,7 @@ export function BarcodeScanner({ onDetected }: { onDetected(barcode: string): vo
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number>();
   const [active, setActive] = useState(false);
-  const [unsupported, setUnsupported] = useState(false);
+  const [scannerMessage, setScannerMessage] = useState('');
 
   const stop = () => {
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
@@ -21,8 +22,34 @@ export function BarcodeScanner({ onDetected }: { onDetected(barcode: string): vo
   useEffect(() => stop, []);
 
   const start = async () => {
+    setScannerMessage('');
+    if (Capacitor.isNativePlatform()) {
+      setActive(true);
+      try {
+        const { CapacitorBarcodeScanner, CapacitorBarcodeScannerCameraDirection, CapacitorBarcodeScannerScanOrientation, CapacitorBarcodeScannerTypeHint } = await import('@capacitor/barcode-scanner');
+        const result = await CapacitorBarcodeScanner.scanBarcode({
+          hint: CapacitorBarcodeScannerTypeHint.ALL,
+          cameraDirection: CapacitorBarcodeScannerCameraDirection.BACK,
+          scanOrientation: CapacitorBarcodeScannerScanOrientation.PORTRAIT,
+          scanInstructions: 'Alinea el código de barras dentro del recuadro.',
+          scanButton: false,
+          cancelButtonAccessibilityLabel: 'Cancelar escaneo',
+          torchButtonOnAccessibilityLabel: 'Apagar linterna',
+          torchButtonOffAccessibilityLabel: 'Encender linterna',
+        });
+        const value = result.ScanResult?.replace(/\D/g, '') ?? '';
+        if (/^\d{8,14}$/.test(value)) onDetected(value);
+        else if (value) setScannerMessage('El código detectado no corresponde a un producto EAN o UPC válido.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message && !/cancel/i.test(message)) setScannerMessage('No pudimos abrir el escáner. Revisa el permiso de cámara en Ajustes.');
+      } finally {
+        setActive(false);
+      }
+      return;
+    }
     const BarcodeDetector = (globalThis as typeof globalThis & { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
-    if (!BarcodeDetector || !navigator.mediaDevices?.getUserMedia) { setUnsupported(true); return; }
+    if (!BarcodeDetector || !navigator.mediaDevices?.getUserMedia) { setScannerMessage('Este navegador no ofrece escaneo automático. Ingresa el número impreso bajo el código.'); return; }
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     streamRef.current = stream; setActive(true);
     if (!videoRef.current) return;
@@ -43,6 +70,6 @@ export function BarcodeScanner({ onDetected }: { onDetected(barcode: string): vo
   return <div className="barcode-scanner">
     <video ref={videoRef} muted playsInline className={active ? 'is-active' : ''} />
     <IonButton fill="outline" onClick={active ? stop : start}><IonIcon slot="start" icon={active ? stopCircleOutline : cameraOutline} />{active ? 'Detener cámara' : 'Escanear con cámara'}</IonButton>
-    {unsupported && <small>Este navegador no ofrece escaneo nativo. Ingresa el número del código de barras o usa la app nativa posteriormente.</small>}
+    {scannerMessage && <small>{scannerMessage}</small>}
   </div>;
 }

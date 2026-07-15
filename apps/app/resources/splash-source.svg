@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732">
+  <rect width="2732" height="2732" fill="#F8F6EF"/>
+  <g transform="translate(854 690)">
+    <rect width="1024" height="1024" rx="224" fill="#2F5233"/>
+    <path d="M230 224c132 38 216 128 280 248 56-114 144-202 284-248-28 246-112 450-284 588-168-138-254-340-280-588Z" fill="#FFFFFF"/>
+    <path d="M316 312c58 46 122 124 194 250 72-124 138-202 200-250-34 156-98 286-200 396-98-108-160-240-194-396Z" fill="#5A7D5E"/>
+    <circle cx="510" cy="362" r="58" fill="#E6C7B2"/>
+  </g>
+  <text x="1366" y="1910" text-anchor="middle" font-family="Avenir Next, Avenir, Helvetica, sans-serif" font-size="176" font-weight="700" letter-spacing="24" fill="#2F5233">VITAMATE</text>
+  <text x="1366" y="2050" text-anchor="middle" font-family="Avenir Next, Avenir, Helvetica, sans-serif" font-size="58" font-weight="600" letter-spacing="12" fill="#5A7D5E">TU ENTRENADOR PERSONAL</text>
+</svg>

@@ -1,65 +1,41 @@
-# Privacy Data Map (App Store / Google Play)
+# Mapa de datos para App Privacy
 
-Este documento mapea los datos recopilados por VITAMATE para cumplir con los requisitos de App Privacy de Apple y Data Safety de Google Play.
+Este documento es la fuente de trabajo para completar el cuestionario de privacidad de App Store Connect. Debe compararse con producción antes de cada versión.
 
-## Datos Recopilados
+| Categoría Apple | Ejemplos VITAMATE | Vinculado al usuario | Tracking | Finalidad |
+|---|---|---:|---:|---|
+| Nombre | Nombre completo y preferido | Sí | No | Cuenta y personalización |
+| Email | Inicio de sesión y soporte | Sí | No | Autenticación/comunicación |
+| Salud | Peso, altura, objetivos, consumo, documentos voluntarios | Sí | No | Funcionalidad de la app |
+| Fitness | Actividad, entrenamientos, pasos y energía autorizados | Sí | No | Funcionalidad de la app |
+| Fotos o videos | Fotos de alimentos y archivos elegidos | Sí | No | Análisis solicitado |
+| Otro contenido | Mensajes, memoria de VITACOACH y notas | Sí | No | Coach y personalización |
+| Historial de compras | Producto, vigencia y transacción | Sí | No | Suscripción/antifraude |
+| ID de usuario | UUID de Supabase y appAccountToken | Sí | No | Cuenta/seguridad |
 
-### Información de Contacto
-| Dato | Propósito | Vinculado a Identidad | Seguimiento |
-|------|-----------|----------------------|-------------|
-| Email | Autenticación, comunicación | Sí | No |
-| Nombre preferido | Personalización | Sí | No |
+VITAMATE no usa datos para publicidad ni seguimiento entre apps o sitios. No se declara ubicación precisa, contactos, historial de navegación, SMS ni llamadas telefónicas.
 
-### Salud y Fitness
-| Dato | Propósito | Vinculado a Identidad | Seguimiento |
-|------|-----------|----------------------|-------------|
-| Peso | Cálculo de planes nutricionales | Sí | No |
-| Altura | Cálculo de gasto energético | Sí | No |
-| Medidas corporales | Seguimiento de progreso | Sí | No |
-| Porcentaje de grasa | Cálculos opcionales | Sí | No |
-| Actividad física | Seguimiento de entrenamientos | Sí | No |
-| Datos de HealthKit/Health Connect | Sincronización de actividad | Sí | No |
-| Consumo alimentario | Seguimiento nutricional | Sí | No |
+## Encargados tecnológicos actuales
 
-### Contenido del Usuario
-| Dato | Propósito | Vinculado a Identidad | Seguimiento |
-|------|-----------|----------------------|-------------|
-| Fotos de alimentos | Análisis nutricional por IA | Sí | No |
-| Fotos de progreso | Seguimiento personal | Sí | No |
-| Mensajes de chat | Interacción con coach IA | Sí | No |
-| Notas de entrenamiento | Registro personal | Sí | No |
+| Proveedor | Información necesaria |
+|---|---|
+| Supabase | Cuenta, base de datos, RLS y almacenamiento |
+| OpenAI | Mensajes, contexto mínimo, archivos/fotos cuando la persona solicita análisis |
+| Apple | Compra de App Store y datos de Apple Health autorizados localmente |
+| Stripe | Compras realizadas en la web |
+| Brevo | Email y contenido transaccional |
+| fal.ai/Cloudinary | Activos globales generados; no debe enviarse información clínica del usuario |
 
-### Información Financiera
-| Dato | Propósito | Vinculado a Identidad | Seguimiento |
-|------|-----------|----------------------|-------------|
-| Historial de compras | Gestión de suscripción | Sí | No |
+## Controles ya implementados
 
-### Analítica
-| Dato | Propósito | Vinculado a Identidad | Seguimiento |
-|------|-----------|----------------------|-------------|
-| Eventos de producto | Mejora de la app | No | No |
-| Crashlytics | Estabilidad | No | No |
+- Sesión nativa guardada en Keychain.
+- Permisos de cámara, fotos, micrófono y salud con descripción contextual.
+- HealthKit no se usa para publicidad.
+- Eliminación dentro de Cuenta → **Eliminar mi cuenta y mis datos**.
+- La API cancela suscripciones Stripe activas antes de borrar; una compra de App Store se administra separadamente con Apple y la UI lo advierte.
+- RLS y autorización separan los datos de cada cuenta.
+- `PrivacyInfo.xcprivacy` declara recopilación vinculada, sin tracking.
 
-## Datos NO Recopilados
-- Ubicación precisa.
-- Contactos del dispositivo.
-- Historial de navegación.
-- Mensajes SMS/llamadas.
-- Archivos del dispositivo (más allá de fotos seleccionadas por el usuario).
+## Antes de enviar
 
-## Datos NO Usados para Seguimiento (Tracking)
-VITAMATE **no** realiza tracking publicitario. Ningún dato se comparte con redes publicitarias, data brokers o terceros para perfilado.
-
-## Datos Compartidos con Terceros
-| Tercero | Datos | Propósito |
-|---------|-------|-----------|
-| Stripe | Email, ID de cliente | Procesamiento de pagos |
-| OpenAI/Anthropic | Contexto anonimizado del usuario, fotos de comida | Generación de respuestas de IA |
-| Supabase | Todos los datos almacenados | Infraestructura (procesador de datos) |
-
-## Retención y Eliminación
-- Los datos se retienen mientras la cuenta esté activa.
-- El usuario puede exportar todos sus datos en cualquier momento.
-- El usuario puede solicitar eliminación completa de su cuenta.
-- Tras solicitud de eliminación, los datos se purgan en un plazo máximo de 30 días.
-- Las fotografías se eliminan del storage inmediatamente.
+Revisar que Aviso de Privacidad y App Store Connect coincidan exactamente con el binario y el backend desplegado. Completar razón social, domicilio, responsable, plazos de conservación y mecanismo ARCO reales; el texto comercial actual todavía indica que esos datos jurídicos están pendientes.

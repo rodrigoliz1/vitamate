@@ -16,7 +16,7 @@ const recipes = [
 ];
 
 if (!process.env.ADMIN_BOOTSTRAP_TOKEN) throw new Error('ADMIN_BOOTSTRAP_TOKEN no está configurado.');
-const endpoint = process.env.VITAMATE_API_URL ?? "http://192.168.0.9:3001";
+const endpoint = process.env.VITAMATE_API_URL ?? 'http://127.0.0.1:3001';
 
 async function generate([recipeKey, name, ingredients]) {
   const response = await fetch(`${endpoint}/v1/admin/nutrition/generate-meal-image`, {

@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import Stripe from 'stripe';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { BrevoAuthEmailProvider, BrevoDeliveryError } from '../providers/brevoAuthEmail.js';
 import { allowPersistentRequest } from '../services/rateLimit.js';
+import { requireUser } from '../services/auth.js';
 import { requireSupabase } from '../services/supabase.js';
 
 const emailProvider = new BrevoAuthEmailProvider();
@@ -20,6 +22,21 @@ function isUnknownEmailError(error: unknown): boolean {
 }
 
 export async function authRoutes(app: FastifyInstance) {
+  app.delete('/v1/auth/account', async (request, reply) => {
+    const { userId } = await requireUser(request);
+    const db = requireSupabase();
+    const { data: billingCustomer, error: billingError } = await db.from('billing_customers').select('stripe_customer_id').eq('user_id', userId).maybeSingle();
+    if (billingError) throw billingError;
+    if (billingCustomer?.stripe_customer_id && config.STRIPE_SECRET_KEY) {
+      const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+      const subscriptions = await stripe.subscriptions.list({ customer: billingCustomer.stripe_customer_id, status: 'all', limit: 100 });
+      await Promise.all(subscriptions.data.filter((subscription) => !['canceled', 'incomplete_expired'].includes(subscription.status)).map((subscription) => stripe.subscriptions.cancel(subscription.id)));
+    }
+    const { error } = await db.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    return reply.code(200).send({ deleted: true });
+  });
+
   app.post('/v1/auth/register', async (request, reply) => {
     const body = z.object({
       email: emailSchema,

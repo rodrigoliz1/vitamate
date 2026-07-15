@@ -1,62 +1,43 @@
-# App Review Notes Template
+# Notas para App Review
 
-## Notas para el Equipo de Revisión de Apple
+Copiar a App Store Connect y sustituir los campos entre corchetes.
 
-### Descripción de la App
-VITAMATE es un entrenador personal inteligente que integra nutrición personalizada, planes de entrenamiento y un coach de inteligencia artificial. La app ayuda a los usuarios a alcanzar sus objetivos de bienestar mediante seguimiento de alimentos, rutinas de ejercicio y monitoreo de progreso.
+## Cuenta de revisión
 
-### Credenciales de Prueba
+```text
+Email: [CUENTA_DE_REVIEW]
+Contraseña: [CONTRASEÑA]
+OTP: la cuenta debe quedar confirmada antes del envío
 ```
-Email: review@vitamate.mx
-Password: [GENERAR ANTES DEL ENVÍO]
-```
-La cuenta de prueba tiene una suscripción Premium activa y datos de ejemplo precargados.
 
-### Funcionalidades que Requieren Explicación
+La cuenta debe tener Premium activo y datos de muestra sin información de una persona real.
 
-#### HealthKit
-La app solicita acceso a datos de salud para:
-- **Pasos, energía y distancia:** Calcular el gasto energético real del usuario y ajustar sus planes nutricionales.
-- **Peso:** Sincronizar las mediciones del usuario para el seguimiento de progreso.
-- **Entrenamientos:** Registrar las sesiones completadas en Apple Health.
+## Descripción
 
-Los permisos se solicitan únicamente cuando el usuario activa la función "Conectar Apple Health" en la sección de Progreso, no al abrir la app.
+VITAMATE integra seguimiento nutricional, entrenamientos guiados y VITACOACH. La modalidad Gratis permite registrar alimentos mediante búsqueda, código de barras y alimentos personales; las funciones de IA, entrenamiento y planificación requieren Premium.
 
-#### Inteligencia Artificial
-La app incluye un coach conversacional basado en inteligencia artificial que:
-- Responde preguntas sobre nutrición y entrenamiento.
-- Propone ajustes al plan del usuario (requiere confirmación explícita).
-- Analiza fotos de comida para estimar calorías (presentados como estimaciones).
-- **No proporciona diagnósticos médicos.**
-- **No reemplaza la atención de un profesional de salud.**
+## Cómo probar
 
-#### Suscripciones
-- VITAMATE Premium Mensual: [PRECIO MXN]/mes
-- VITAMATE Premium Anual: [PRECIO MXN]/año
-- Prueba gratuita configurable.
-- La suscripción se renueva automáticamente a menos que se cancele 24 horas antes del fin del período.
-- El pago se carga a la cuenta de iTunes al confirmar la compra.
+1. Iniciar sesión con la cuenta anterior; no es necesario repetir el onboarding.
+2. Nutrición → buscar y registrar un alimento.
+3. Nutrición → cámara → tomar o elegir una foto y confirmar la estimación.
+4. Entrenar → elegir gimnasio/casa → iniciar y completar una sesión.
+5. VITACOACH → chat; para llamada conceder micrófono.
+6. Progreso → Conectar Apple Health. El permiso sólo aparece después de este toque y puede denegarse.
+7. Nombre del usuario → Suscripción → Restaurar/Administrar en App Store.
+8. Nombre del usuario → Eliminar mi cuenta y mis datos.
 
-#### Cámara
-La app usa la cámara únicamente para:
-- Fotografiar alimentos para análisis nutricional.
-- Tomar fotos de progreso corporal (opcional, almacenadas de forma privada).
+## Aclaraciones
 
-#### Eliminación de Cuenta
-Disponible en: Perfil → Configuración → Eliminar cuenta.
-La eliminación es permanente y elimina todos los datos del usuario.
+- Las recomendaciones de IA son orientación de bienestar, no diagnóstico ni atención de urgencia.
+- Las fotos de comida producen estimaciones que el usuario confirma antes de registrar.
+- Apple Health se lee sólo después de consentimiento contextual; negar permisos no bloquea la app.
+- Las nuevas compras dentro de iOS usan exclusivamente In-App Purchase.
+- La app requiere internet para IA, sincronización, pagos y catálogos remotos.
 
-### Rutas para Probar
-1. **Onboarding:** Abrir la app → Crear cuenta → Completar los 8 pasos.
-2. **Nutrición:** Tab Nutrición → Agregar alimento manual → Buscar "Pollo".
-3. **Foto de comida:** Tab Nutrición → Botón cámara → Tomar foto → Revisar estimación.
-4. **Entrenamiento:** Tab Entrenar → Iniciar sesión → Registrar sets → Completar.
-5. **Coach:** Tab Coach → Enviar mensaje → Recibir respuesta.
-6. **Progreso:** Tab Progreso → Agregar peso → Ver tendencia.
-7. **Suscripción:** Perfil → Suscripción → Restaurar compras.
-8. **Eliminar cuenta:** Perfil → Configuración → Eliminar cuenta.
+## URLs
 
-### Notas Adicionales
-- La app requiere conexión a internet para las funciones de IA y sincronización.
-- El entrenamiento del día y el plan actual funcionan sin conexión.
-- La app está disponible inicialmente en español (México).
+- Privacidad: `https://vitamate.mx/privacidad`
+- Términos: `https://vitamate.mx/terminos`
+- Soporte: `https://vitamate.mx/soporte`
+- Notificaciones App Store: `https://api.vitamate.mx/v1/billing/apple/notifications`

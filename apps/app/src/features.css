@@ -79,6 +79,27 @@
 }
 @media(max-width:390px){.vitacoach-shell .coach-composer{grid-template-columns:auto minmax(0,1fr) auto auto}.vitacoach-shell .coach-document-button{display:none!important}}
 
+/* Capacitor/iOS owns the keyboard resize. The chat becomes a fixed four-row
+   layout so its composer always follows the keyboard like a native messenger. */
+.capacitor-native body{overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+.capacitor-native input,.capacitor-native textarea,.capacitor-native select{-webkit-user-select:text;user-select:text;font-size:16px}
+.capacitor-native .app-page ion-content{--padding-top:env(safe-area-inset-top)}
+.capacitor-native .native-coach-page ion-content::part(scroll){overflow:hidden}
+.capacitor-native .native-coach-page .vitacoach-shell{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;width:min(100% - 20px,1180px);height:100%;min-height:0;padding-top:max(8px,env(safe-area-inset-top));padding-bottom:6px}
+.capacitor-native .native-coach-page .coach-conversation{width:100%;min-height:0;max-height:none;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.capacitor-native .native-coach-page .coach-footer{position:relative;z-index:4;width:100%;padding-bottom:2px;background:var(--vita-cream)}
+.capacitor-native .native-coach-page .coach-composer{width:100%;margin-top:6px;grid-template-columns:auto auto minmax(0,1fr) auto auto}
+.capacitor-native .native-coach-page .coach-composer textarea{resize:none;font-size:16px}
+.capacitor-native.native-keyboard-open .native-coach-page .coach-heading{display:none}
+.capacitor-native.native-keyboard-open .native-coach-page .suggestion-grid{display:none}
+.capacitor-native.native-keyboard-open .native-coach-page .vitacoach-shell{grid-template-rows:auto minmax(0,1fr) auto}
+.capacitor-native.native-keyboard-open .native-coach-page .coach-footer{padding-bottom:0}
+.native-photo-actions{display:grid;gap:10px}
+.healthkit-card{display:grid;gap:18px;margin-top:24px;padding:26px;border:1px solid var(--vita-line);border-radius:26px;background:var(--vita-surface);box-shadow:var(--vita-shadow)}
+.healthkit-card>header{display:flex;align-items:center;gap:14px}.healthkit-card>header>span{display:grid;place-items:center;width:48px;height:48px;border-radius:16px;color:white;background:linear-gradient(145deg,#e85a6a,#ff7b86);font-size:1.4rem}.healthkit-card h2,.healthkit-card p{margin:0}.healthkit-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.healthkit-stats article{display:grid;gap:6px;padding:16px;border-radius:18px;background:var(--vita-sage-soft)}.healthkit-stats article>ion-icon{color:#df4e62;font-size:1.35rem}.healthkit-stats small{color:var(--vita-muted)}.healthkit-stats strong{color:var(--vita-forest);font-size:1.35rem}.healthkit-stats b{font-size:.75rem;font-weight:700}
+@media(max-width:620px){.healthkit-stats{grid-template-columns:1fr}.capacitor-native .native-coach-page .coach-footer .suggestion-grid{display:none}.capacitor-native .native-coach-page .coach-heading{padding-bottom:0}}
+.account-delete-link{display:inline-flex;align-items:center;gap:8px;margin:28px 0;padding:10px 0;border:0;color:var(--vita-danger);background:transparent;font-weight:800;cursor:pointer}.account-delete-modal{--width:min(540px,calc(100% - 28px));--height:auto;--border-radius:28px}.account-delete-dialog{position:relative;display:grid;gap:14px;padding:34px;background:var(--vita-surface)}.account-delete-dialog>span{display:grid;place-items:center;width:58px;height:58px;border-radius:20px;color:var(--vita-danger);background:#f8e5e5;font-size:1.7rem}.account-delete-dialog h2,.account-delete-dialog p{margin:0}.account-delete-dialog>p:not(.eyebrow){color:var(--vita-muted);line-height:1.55}
+
 /* Nutrition portion calculator and official-market grocery estimator */
 .portion-calculator{display:grid;grid-template-columns:minmax(190px,260px) 1fr;align-items:end;gap:14px;padding:14px;border:1px solid var(--vita-line);border-radius:16px;background:var(--vita-sage-soft)}
 .portion-calculator>span{padding-bottom:12px;color:var(--vita-muted);font-size:.7rem;line-height:1.45}
@@ -107,3 +128,5 @@
 @media(max-width:680px){.body-outcome-grid,.plan-reveal-summary{grid-template-columns:1fr}.sex-selector{grid-template-columns:1fr;margin-bottom:24px}.body-outcome-card{grid-template-columns:100px 1fr;align-items:center;padding:0}.body-outcome-visual{grid-row:1/3;height:120px}.body-outcome-card>strong,.body-outcome-card>small{padding:0 12px}.body-outcome-card>small{grid-column:2}.journey-line{grid-template-columns:1fr;justify-items:center}.journey-line i{width:3px;height:24px}.premium-benefits{grid-template-columns:repeat(2,1fr)}.subscription-plan{grid-template-columns:1fr auto}.subscription-plan>ion-spinner{position:absolute;right:8px}.subscription-modal{--width:100%;--height:100%;--max-height:100%;--border-radius:0}.subscription-shell{max-height:100dvh;min-height:100dvh}.otp-field input{letter-spacing:.35em}}
 .food-method-grid button.is-premium-locked { position: relative; border-color: rgba(47,82,51,.25); background: linear-gradient(145deg, rgba(237,243,236,.72), rgba(255,255,255,.9)); }
 .inline-premium-lock { width: .85em; height: .85em; margin-left: 5px; vertical-align: -1px; color: var(--ion-color-primary, #2f5233); }
+.subscription-legal { max-width: 610px; margin: 18px auto 0; color: var(--vita-muted); font-size: .66rem; line-height: 1.5; text-align: center; }
+.subscription-legal a { color: var(--vita-forest); font-weight: 800; text-decoration: underline; }

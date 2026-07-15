@@ -11,9 +11,11 @@ export interface Entitlement {
   trialUsed: boolean;
   cancelAtPeriodEnd: boolean;
   stripeCustomerId: string | null;
+  source: 'none' | 'stripe' | 'apple';
+  appleProductId: string | null;
 }
 
-const selectFields = 'user_id, plan, status, billing_interval, current_period_end, trial_end, trial_used, cancel_at_period_end, stripe_customer_id';
+const selectFields = 'user_id, plan, status, billing_interval, current_period_end, trial_end, trial_used, cancel_at_period_end, stripe_customer_id, source, apple_product_id';
 
 function map(row: Record<string, unknown>): Entitlement {
   return {
@@ -26,6 +28,8 @@ function map(row: Record<string, unknown>): Entitlement {
     trialUsed: row.trial_used === true,
     cancelAtPeriodEnd: row.cancel_at_period_end === true,
     stripeCustomerId: typeof row.stripe_customer_id === 'string' ? row.stripe_customer_id : null,
+    source: row.source === 'stripe' || row.source === 'apple' ? row.source : 'none',
+    appleProductId: typeof row.apple_product_id === 'string' ? row.apple_product_id : null,
   };
 }
 
@@ -90,12 +94,77 @@ export async function upsertSubscription(input: {
     current_period_end: input.currentPeriodEnd,
     trial_end: input.trialEnd,
     cancel_at_period_end: input.cancelAtPeriodEnd,
+    source: 'stripe',
     updated_at: new Date().toISOString(),
   };
   // Nunca se revierte trial_used: una prueba utilizada sigue consumida aunque
   // la suscripción posterior ya no tenga trial_end.
   if (input.trialEnd !== null) payload.trial_used = true;
   const { error } = await requireSupabase().from('subscription_entitlements').upsert(payload, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+export async function upsertAppleSubscription(input: {
+  userId: string;
+  originalTransactionId: string;
+  transactionId: string;
+  productId: string;
+  environment: string;
+  billingInterval: 'month' | 'year';
+  currentPeriodEnd: string;
+  active: boolean;
+  trialUsed: boolean;
+  cancelAtPeriodEnd?: boolean;
+}): Promise<void> {
+  const db = requireSupabase();
+  const existingEntitlement = await getEntitlement(input.userId);
+  const { data: owner, error: ownerError } = await db.from('apple_purchase_accounts').select('user_id').eq('original_transaction_id', input.originalTransactionId).maybeSingle();
+  if (ownerError) throw ownerError;
+  if (owner && owner.user_id !== input.userId) {
+    throw Object.assign(new Error('Esta compra de App Store ya está vinculada a otra cuenta VITAMATE.'), { statusCode: 409, code: 'APPLE_PURCHASE_ALREADY_LINKED' });
+  }
+  const now = new Date().toISOString();
+  const { error: mappingError } = await db.from('apple_purchase_accounts').upsert({
+    original_transaction_id: input.originalTransactionId,
+    user_id: input.userId,
+    product_id: input.productId,
+    environment: input.environment,
+    updated_at: now,
+  }, { onConflict: 'original_transaction_id' });
+  if (mappingError) throw mappingError;
+  const { error } = await db.from('subscription_entitlements').upsert({
+    user_id: input.userId,
+    plan: input.active ? 'premium' : 'free',
+    status: input.active ? 'active' : 'canceled',
+    billing_interval: input.billingInterval,
+    current_period_end: input.currentPeriodEnd,
+    trial_used: existingEntitlement.trialUsed || input.trialUsed,
+    cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
+    source: 'apple',
+    apple_original_transaction_id: input.originalTransactionId,
+    apple_transaction_id: input.transactionId,
+    apple_product_id: input.productId,
+    apple_environment: input.environment,
+    updated_at: now,
+  }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+export async function userIdForAppleOriginalTransaction(originalTransactionId: string): Promise<string | null> {
+  const { data, error } = await requireSupabase().from('apple_purchase_accounts').select('user_id').eq('original_transaction_id', originalTransactionId).maybeSingle();
+  if (error) throw error;
+  return data?.user_id ?? null;
+}
+
+export async function claimAppleWebhookEvent(notificationUuid: string, notificationType: string): Promise<boolean> {
+  const { error } = await requireSupabase().from('apple_webhook_events').insert({ notification_uuid: notificationUuid, notification_type: notificationType });
+  if (!error) return true;
+  if (error.code === '23505') return false;
+  throw error;
+}
+
+export async function releaseAppleWebhookEvent(notificationUuid: string): Promise<void> {
+  const { error } = await requireSupabase().from('apple_webhook_events').delete().eq('notification_uuid', notificationUuid);
   if (error) throw error;
 }
 

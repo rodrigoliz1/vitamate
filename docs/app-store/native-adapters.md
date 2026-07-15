@@ -1,137 +1,37 @@
-# Native Adapters Documentation
+# Adaptadores nativos implementados
 
-## Resumen
-VITAMATE utiliza un patrón de adaptadores para abstraer las funcionalidades específicas de cada plataforma. Esto permite que la lógica de negocio y los componentes UI sean agnósticos a la plataforma, facilitando la transición de PWA a aplicaciones nativas.
+VITAMATE conserva una base Ionic React y selecciona capacidades por `Capacitor.getPlatform()`.
 
-## Interfaces y sus Implementaciones
+| Capacidad | Web/PWA | iOS | Archivo principal |
+|---|---|---|---|
+| Sesión | Supabase en almacenamiento web | Supabase PKCE y sesión en Keychain | `src/services/supabase.ts` |
+| Pagos | Stripe Checkout/Portal | StoreKit y restauración | `src/services/nativeBilling.ts` |
+| Cámara | Selector de archivo/capture | Cámara y galería nativas | `src/services/nativeCamera.ts` |
+| Código de barras | `BarcodeDetector` y entrada manual | Escáner nativo EAN/UPC | `src/components/BarcodeScanner.tsx` |
+| Salud | Registro manual | Apple Health contextual | `src/services/nativeHealth.ts` |
+| Ciclo de app | Eventos del navegador | deep link, resume y red | `src/services/nativePlatform.ts` |
+| Teclado | Visual Viewport | resize nativo de Capacitor | `capacitor.config.json` y CSS |
+| IA | API de VITAMATE | La misma API; ningún secreto en el binario | `src/services/api.ts` |
 
-### AuthProvider
-| Método | Descripción |
-|--------|-------------|
-| `signIn(credentials)` | Autenticar usuario |
-| `signOut()` | Cerrar sesión |
-| `refreshSession()` | Renovar token |
-| `getSession()` | Obtener sesión actual |
+## Proyecto iOS
 
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `SupabaseAuthProvider` | Web / PWA | Supabase Auth con email + Google |
-| `AppleSignInProvider` | iOS | Sign in with Apple + vinculación con Supabase |
+- Ruta: `apps/app/ios/App/App.xcodeproj`.
+- Bundle ID: `mx.vitamate.app`.
+- iOS mínimo: 15.0.
+- Dispositivos: iPhone e iPad.
+- Icono: 1024×1024 opaco y variantes generadas en `Assets.xcassets`.
+- Capacidades: HealthKit y Associated Domains.
+- URL scheme para auth: `mx.vitamate://auth/callback`.
+- `PrivacyInfo.xcprivacy` está incluido en Resources.
 
----
+## Reglas de arquitectura
 
-### BillingProvider
-| Método | Descripción |
-|--------|-------------|
-| `getOfferings()` | Listar productos disponibles |
-| `purchase(productId)` | Iniciar compra |
-| `restorePurchases()` | Restaurar compras previas |
-| `openManagementPortal()` | Gestionar suscripción |
+1. Claves de OpenAI, fal.ai, Stripe, Brevo, Supabase service role y Apple nunca entran al frontend.
+2. Cualquier compra se verifica en la API antes de conceder Premium.
+3. Un plugin nativo debe tener degradación explícita en web o quedar oculto allí.
+4. Después de cambiar dependencias o configuración ejecutar `pnpm --filter vitamate-app native:sync:ios`.
+5. No editar `ios/App/App/public`; se reemplaza al sincronizar.
 
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `StripeWebBillingProvider` | Web / PWA | Stripe Checkout + Customer Portal |
-| `StoreKitBillingProvider` | iOS | StoreKit 2, verificación S2S |
-| `GooglePlayBillingProvider` | Android | Google Play Billing Library |
+## Capacidades instaladas
 
----
-
-### CameraProvider
-| Método | Descripción |
-|--------|-------------|
-| `capturePhoto(options?)` | Tomar foto con cámara |
-| `selectFromLibrary(options?)` | Seleccionar desde galería |
-
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `BrowserCameraProvider` | Web / PWA | `<input type="file" capture>` |
-| `CapacitorCameraProvider` | iOS / Android | `@capacitor/camera` nativo |
-
----
-
-### NotificationProvider
-| Método | Descripción |
-|--------|-------------|
-| `requestPermission()` | Solicitar permiso |
-| `register()` | Registrar dispositivo |
-| `scheduleLocal?(notification)` | Programar notificación local |
-
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `WebPushNotificationProvider` | Web / PWA | Web Push API |
-| `APNSNotificationProvider` | iOS | Apple Push Notification service |
-| `FirebasePushProvider` | Android | Firebase Cloud Messaging |
-
----
-
-### SecureStorageProvider
-| Método | Descripción |
-|--------|-------------|
-| `get(key)` | Leer valor |
-| `set(key, value)` | Guardar valor |
-| `remove(key)` | Eliminar valor |
-| `clear()` | Limpiar todo |
-
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `WebSecureStorageProvider` | Web / PWA | `localStorage` (limitado) |
-| `IOSSecureStorageProvider` | iOS | Keychain |
-| `AndroidSecureStorageProvider` | Android | EncryptedSharedPreferences |
-
----
-
-### HealthDataProvider
-| Método | Descripción |
-|--------|-------------|
-| `isAvailable()` | ¿Disponible en este dispositivo? |
-| `requestPermissions(types)` | Solicitar permisos granulares |
-| `getDailyActivity(date)` | Actividad del día |
-| `getMeasurements(range)` | Mediciones en rango |
-| `getWorkouts(range)` | Entrenamientos externos |
-| `saveWorkout?(workout)` | Guardar entrenamiento (opcional) |
-
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `ManualHealthDataProvider` | Web / PWA | Entrada manual de datos |
-| `AppleHealthKitProvider` | iOS | HealthKit nativo |
-| `HealthConnectProvider` | Android | Health Connect API |
-
----
-
-### AIProvider
-| Método | Descripción |
-|--------|-------------|
-| `generateCoachResponse(input)` | Respuesta del coach |
-| `analyzeFoodImage(input)` | Análisis de foto de comida |
-| `generateNutritionPlan(input)` | Generar plan nutricional |
-| `generateWorkoutPlan(input)` | Generar plan de entrenamiento |
-
-| Implementación | Plataforma | Notas |
-|---------------|-----------|-------|
-| `OpenAIProvider` | Todas | Adaptador para OpenAI API |
-| `AnthropicProvider` | Todas | Adaptador futuro |
-
-> **Nota:** `AIProvider` se ejecuta en el **backend**, no en el cliente. Las implementaciones son del lado del servidor exclusivamente.
-
-## Selección de Adaptador
-
-La selección se realiza mediante detección de plataforma en tiempo de ejecución:
-
-```typescript
-import { Capacitor } from '@capacitor/core';
-
-function createBillingProvider(): BillingProvider {
-  const platform = Capacitor.getPlatform();
-  
-  switch (platform) {
-    case 'ios':
-      return new StoreKitBillingProvider();
-    case 'android':
-      return new GooglePlayBillingProvider();
-    default:
-      return new StripeWebBillingProvider();
-  }
-}
-```
-
-Los adaptadores se registran centralmente y se inyectan a los componentes mediante React Context, evitando que la UI importe directamente SDKs nativos.
+Capacitor App, Barcode Scanner, Browser, Camera, Haptics, Keyboard, Local Notifications, Network, Preferences, Push Notifications, Splash Screen, Status Bar, almacenamiento seguro, Apple Health y compras nativas. Push/local notifications están instaladas y preparadas, pero la experiencia de recordatorios y el registro APNs del servidor deben validarse antes de solicitarlos al usuario.

@@ -1,51 +1,37 @@
-# HealthKit Permissions
+# Apple Health: permisos implementados
 
-## Tipos de Datos Solicitados
+Estado del código al 14 de julio de 2026.
 
-### Lectura (HKObjectType)
-| Tipo | Identificador | Cuándo se solicita | Propósito |
-|------|---------------|-------------------|-----------|
-| Pasos | `HKQuantityTypeIdentifierStepCount` | Al activar sincronización | Actividad diaria |
-| Energía activa | `HKQuantityTypeIdentifierActiveEnergyBurned` | Al activar sincronización | Cálculo de TDEE |
-| Energía en reposo | `HKQuantityTypeIdentifierBasalEnergyBurned` | Al activar sincronización | Cálculo de TDEE |
-| Distancia | `HKQuantityTypeIdentifierDistanceWalkingRunning` | Al activar sincronización | Registro de actividad |
-| Minutos de ejercicio | `HKQuantityTypeIdentifierAppleExerciseTime` | Al activar sincronización | Registro de actividad |
-| Peso | `HKQuantityTypeIdentifierBodyMass` | Al activar sincronización | Seguimiento de peso |
-| Entrenamientos | `HKWorkoutType` | Al activar sincronización | Registro de actividad |
-| Frecuencia cardiaca | `HKQuantityTypeIdentifierHeartRate` | Solo si el usuario activa monitoreo cardíaco | Métricas avanzadas |
-| Sueño | `HKCategoryTypeIdentifierSleepAnalysis` | Con consentimiento separado | Recuperación |
+## Alcance actual
 
-### Escritura (HKObjectType)
-| Tipo | Identificador | Cuándo se solicita | Propósito |
-|------|---------------|-------------------|-----------|
-| Entrenamientos | `HKWorkoutType` | Al completar un entrenamiento | Registrar sesiones |
-| Peso | `HKQuantityTypeIdentifierBodyMass` | Al registrar peso en la app | Sincronizar mediciones |
+La integración está en `apps/app/src/services/nativeHealth.ts` y sólo se activa en iOS cuando la persona pulsa **Conectar Apple Health** desde Progreso. Negar el permiso no impide utilizar VITAMATE.
 
-## Estrategia de Solicitud de Permisos
+| Dato solicitado para lectura | Uso actual |
+|---|---|
+| Pasos | Resumen de actividad del día |
+| Calorías activas | Resumen de gasto activo del día |
+| Frecuencia cardiaca en reposo | Resumen del día |
+| Entrenamientos | Autorizado para sincronización posterior |
+| Peso | Autorizado para sincronización posterior |
 
-### Principio: Solicitud Contextual
-- **NO** solicitar todos los permisos al abrir la app por primera vez.
-- Solicitar cada permiso en el momento en que el usuario active la funcionalidad correspondiente.
-- Ejemplo: el permiso de peso se solicita la primera vez que el usuario accede a la sección de Progreso y activa sincronización.
+La primera versión no escribe datos en HealthKit. Tampoco solicita sueño, ubicación, contactos ni expedientes clínicos. El resumen que se muestra en la app consulta pasos, calorías activas y frecuencia cardiaca en reposo.
 
-### Flujo
-1. Usuario navega a una función que requiere HealthKit.
-2. Se muestra una pantalla explicativa (pre-prompt) indicando qué datos se leerán y por qué.
-3. Si el usuario acepta, se llama a `requestAuthorization`.
-4. Si el usuario deniega, la app funciona normalmente sin esos datos.
-5. Se ofrece la opción de activar permisos desde Configuración más adelante.
+## Comportamiento de privacidad
 
-## Info.plist Strings
-```xml
-<key>NSHealthShareUsageDescription</key>
-<string>VITAMATE usa tus datos de salud para calcular tu gasto energético, registrar tu actividad y personalizar tus planes de entrenamiento y nutrición. Nunca compartimos estos datos con anunciantes.</string>
+- La solicitud es contextual, nunca durante el primer arranque.
+- La app continúa funcionando si se deniega cualquier permiso.
+- Apple Health no se utiliza para publicidad ni seguimiento.
+- La UI identifica el origen como `Apple Health` y muestra cuándo se actualizó.
+- Antes de ampliar los tipos o escribir entrenamientos/peso se debe actualizar esta tabla, `Info.plist`, el manifiesto de privacidad y la ficha de App Store.
 
-<key>NSHealthUpdateUsageDescription</key>
-<string>VITAMATE registra tus entrenamientos completados y tu peso en Apple Health para mantener un historial unificado de tu progreso.</string>
-```
+## Configuración nativa
 
-## Reglas de Seguridad
-- Los datos de HealthKit **nunca** se envían a herramientas de analítica o publicidad.
-- Los datos se sincronizan únicamente al backend de VITAMATE y se almacenan con las mismas políticas de privacidad que el resto de datos del usuario.
-- La desconexión de HealthKit elimina la capacidad de leer nuevos datos pero preserva el historial ya registrado.
-- Se registra el `source` de cada dato como `"apple_health"` para auditoría.
+El target incluye HealthKit en `App.entitlements` y `NSHealthShareUsageDescription` en `Info.plist`. `NSHealthUpdateUsageDescription` se añadirá únicamente cuando exista y se pruebe una función real de escritura.
+
+## Prueba obligatoria
+
+1. Probar en un iPhone físico; el simulador no representa todos los datos.
+2. Abrir Progreso → Conectar Apple Health.
+3. Autorizar sólo algunos datos y confirmar degradación parcial sin errores.
+4. Denegar todos y confirmar que la app sigue operativa.
+5. Revocar permisos en Ajustes → Salud → Acceso a datos y volver a abrir VITAMATE.

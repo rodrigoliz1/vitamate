@@ -13,6 +13,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'offline.html'],
       manifest: {
         name: 'VITAMATE',
@@ -38,7 +39,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'ui-vendor': ['react', 'react-dom', 'react-router-dom', '@ionic/react', '@ionic/react-router', 'ionicons/icons'],
+          'ui-vendor': ['react', 'react-dom', 'react-router-dom', '@ionic/react', '@ionic/react-router'],
+          'icons-vendor': ['ionicons/icons'],
           'supabase-vendor': ['@supabase/supabase-js'],
         },
       },

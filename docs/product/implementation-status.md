@@ -135,6 +135,19 @@
 - El compositor de VITACOACH se reestructuró como `IonFooter` real, fuera del panel desplazable de mensajes: ahora el historial recibe únicamente el alto sobrante y nunca queda debajo de la caja de texto. En móvil se acopla al `VisualViewport` de iOS, con la navegación inferior oculta mientras el teclado está abierto. El selector de foto ofrece explícitamente tomar una fotografía, elegirla del álbum o seleccionar un archivo.
 - Corrección posterior: la composición `IonFooter` no se comportó correctamente en Safari iPhone y se revirtió. El campo volvió al flujo de página, conservando el selector de foto. La solución definitiva del chat móvil queda abierta y exige validación visual en dispositivo real antes de volver a modificar su estructura.
 
+## Adaptación nativa iOS completada en código — 14 de julio de 2026
+
+- Proyecto Capacitor 8/Swift Package Manager generado en `apps/app/ios`, con Bundle ID `mx.vitamate.app`, iOS 15+, iPhone/iPad, icono opaco, splash y manifiesto de privacidad.
+- Sesión Supabase PKCE persistida en Keychain, deep link `mx.vitamate://auth/callback`, reanudación y estado de red nativos.
+- Cámara/galería nativa integradas en Nutrición y VITACOACH; archivos conservan el flujo web. El código de barras usa un escáner nativo EAN/UPC en iOS y mantiene entrada manual/`BarcodeDetector` en PWA.
+- Apple Health solicita acceso contextual y muestra pasos, calorías activas y frecuencia cardiaca en reposo sin bloquear la app si se deniega.
+- Compras iOS migradas a StoreKit: mensual/anual, precio localizado, restaurar y administrar. Stripe permanece exclusivamente para web y los suscriptores web conservan su entitlement al iniciar en iOS.
+- API con verificación criptográfica JWS de Apple, vinculación de compra a UUID Supabase y webhook V2 idempotente. La migración `202607140012_apple_storekit.sql` ya fue aplicada al proyecto remoto.
+- Eliminación de cuenta disponible dentro de Cuenta; la API cancela Stripe y elimina el usuario/datos. La interfaz advierte que las suscripciones App Store se gestionan por Apple.
+- Página pública `vitamate.mx/soporte` añadida para la ficha de App Store.
+- Build de app, typecheck API, lint, sincronización iOS, Capacitor Doctor y validación plist aprobados.
+- El Archive/TestFlight no puede crearse en esta Mac hasta instalar Xcode completo; actualmente sólo están instaladas las Command Line Tools.
+
 ## Decisiones y trabajo pendiente
 
 1. Las 28 guías fotográficas pasan la revisión visual interna de correspondencia suficiente para el MVP. Antes de presentarlas como material técnico validado, un entrenador o fisioterapeuta debe realizar la revisión profesional formal.
@@ -145,6 +158,7 @@
 6. OpenAI Realtime/WebRTC ya está implementado y protegido por sesión y Premium. Falta la matriz final de micrófono/audio en iPhone, Android, iPad y escritorio.
 7. El esquema e importadores oficiales están activos. Falta programar en el proveedor de producción las ejecuciones semanales de PROFECO y mensuales de INPC, más alertas de fallo.
 8. Despliegue decidido: sitio comercial y PWA en Vercel; API en Render. Falta crear los proyectos, variables de producción, dominios `vitamate.mx`, `app.vitamate.mx` y `api.vitamate.mx`, más sus registros DNS/HTTPS.
+9. Para TestFlight faltan tareas que requieren al propietario: Xcode 26+, Team de Apple Developer, App ID/capabilities, Apple numeric App ID, productos StoreKit, contratos/impuestos/banca, servidor de notificaciones, AASA con Team ID, pruebas Sandbox y metadata legal definitiva. El procedimiento está en `docs/app-store/ios-release-runbook.md`.
 
 ## Restricción local detectada
 

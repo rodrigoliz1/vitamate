@@ -50,7 +50,7 @@ supabase/
 docs/        Arquitectura, operaciones, legal y producto
 ```
 
-El monorepo usa pnpm 8, Turborepo y Node 18+ (la estación actual usa una versión más reciente de Node). Los scripts principales están en [`package.json`](../../package.json).
+El monorepo usa pnpm 8, Turborepo y Node 22+; Capacitor 8 requiere esta versión mínima. Los scripts principales están en [`package.json`](../../package.json).
 
 ## 3. Estado funcional implementado
 
@@ -278,6 +278,15 @@ No introducir un segundo sistema de posicionamiento (`fixed` + `IonFooter` + `Vi
 - Brevo puede bloquear IP local como `401 unrecognised IP`; autorizar IP o probar desde servidor.
 - Confirmar SPF, DKIM, DMARC, remitente y entregabilidad con un correo externo real.
 
+### iOS / App Store
+
+- El proyecto nativo Capacitor 8 está generado en `apps/app/ios` con Bundle ID `mx.vitamate.app`, iOS 15+, icono, splash, permisos y manifiesto de privacidad.
+- StoreKit mensual/anual, restauración, precio localizado, Apple Health, cámara/galería, Keychain y deep links están integrados.
+- La API verifica JWS de Apple y App Store Server Notifications V2; la migración `202607140012_apple_storekit.sql` ya está aplicada.
+- Dentro de iOS las compras nuevas no usan Stripe. El acceso comprado en web se reconoce, pero no se promueve un checkout externo.
+- Falta instalar Xcode completo, elegir Team, crear App ID/productos en App Store Connect, configurar el numeric App ID y webhook, publicar AASA, probar Sandbox y subir TestFlight.
+- Usar `docs/app-store/ios-release-runbook.md`, `readiness-checklist.md` e `ios-environment.md` como fuentes actuales.
+
 ## 9. Pendiente antes de lanzamiento público
 
 1. Resolver y probar la interfaz móvil de VITACOACH anterior.
@@ -285,7 +294,7 @@ No introducir un segundo sistema de posicionamiento (`fixed` + `IonFooter` + `Vi
 3. Activar `REQUIRE_COACH_AUTH=true`; revisar RLS con dos usuarios y límites persistentes.
 4. Programar importación semanal PROFECO y mensual INPC con alertas de fallos.
 5. Revisión formal por entrenador/fisioterapeuta de imágenes y rutinas; por nutriólogo de recetas, macros, alergias y reglas de fatiga; por abogado mexicano de legal/privacidad/ARCO.
-6. Completar datos reales de responsable, razón social, domicilio, ARCO, eliminación de cuenta, cookies y conservación de datos en documentos legales.
+6. Completar datos reales de responsable, razón social, domicilio, ARCO, cookies y conservación de datos en documentos legales. La eliminación dentro de la app ya está implementada.
 7. Finalizar traducción inglesa profunda antes de reactivar idioma.
 8. Pruebas end-to-end y regresión visual reales: iPhone, Android, iPad, escritorio, offline/reconexión, accesibilidad, carga, autorización entre cuentas y pagos.
 9. Beta cerrada, analítica respetuosa de privacidad, soporte e iteración antes de pagos públicos.
