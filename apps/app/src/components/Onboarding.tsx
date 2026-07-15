@@ -73,9 +73,14 @@ const OUTCOME_IMAGES: Record<'female' | 'male', Record<Draft['bodyOutcome'], str
   },
 };
 
-export function Onboarding({ onComplete }: { onComplete(profile: UserProfile): void }) {
-  const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState(INITIAL);
+export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialStep = 0 }: {
+  onComplete(profile: UserProfile): void;
+  onExitToAuth?(): void;
+  initialProfile?: UserProfile | null;
+  initialStep?: number;
+}) {
+  const [step, setStep] = useState(() => Math.max(0, Math.min(7, initialStep)));
+  const [draft, setDraft] = useState<Draft>(() => initialProfile ? draftFromProfile(initialProfile) : INITIAL);
   const [error, setError] = useState('');
   const totalSteps = 8;
 
@@ -138,7 +143,7 @@ export function Onboarding({ onComplete }: { onComplete(profile: UserProfile): v
     <IonPage className="onboarding-page">
       <IonContent fullscreen>
         <main className="onboarding-shell">
-          <header className="onboarding-header"><BrandMark /><span>Paso {step + 1} de {totalSteps}</span></header>
+          <header className="onboarding-header"><BrandMark /><div><span>Paso {step + 1} de {totalSteps}</span>{onExitToAuth && <button type="button" onClick={onExitToAuth}>Iniciar sesión</button>}</div></header>
           <div className="step-track"><span style={{ width: `${((step + 1) / totalSteps) * 100}%` }} /></div>
           <form onSubmit={submit} className="onboarding-card">
             {step === 0 && <section>
@@ -225,7 +230,9 @@ export function Onboarding({ onComplete }: { onComplete(profile: UserProfile): v
 
             {error && <p className="form-error" role="alert">{error}</p>}
             <footer className="onboarding-actions">
-              {step > 0 && <IonButton type="button" fill="clear" onClick={() => { setError(''); setStep(step - 1); }}><IonIcon slot="start" icon={arrowBack} />Atrás</IonButton>}
+              {step > 0
+                ? <IonButton type="button" fill="clear" onClick={() => { setError(''); setStep(step - 1); }}><IonIcon slot="start" icon={arrowBack} />Atrás</IonButton>
+                : onExitToAuth && <IonButton type="button" fill="clear" onClick={onExitToAuth}><IonIcon slot="start" icon={arrowBack} />Volver al acceso</IonButton>}
               {step < totalSteps - 1
                 ? <IonButton type="button" className="primary-button" onClick={next}>Continuar<IonIcon slot="end" icon={arrowForward} /></IonButton>
                 : <IonButton type="submit" className="primary-button">Quiero mi mejor versión<IonIcon slot="end" icon={checkmarkCircle} /></IonButton>}
@@ -235,6 +242,28 @@ export function Onboarding({ onComplete }: { onComplete(profile: UserProfile): v
       </IonContent>
     </IonPage>
   );
+}
+
+function draftFromProfile(profile: UserProfile): Draft {
+  return {
+    fullName: profile.fullName ?? profile.preferredName,
+    preferredName: profile.preferredName,
+    bodyOutcome: profile.bodyOutcome ?? 'defined',
+    dateOfBirth: profile.dateOfBirth,
+    biologicalSexForCalculation: profile.biologicalSexForCalculation,
+    heightCm: String(profile.heightCm), weightKg: String(profile.weightKg),
+    primaryGoal: profile.primaryGoal, activityLevel: profile.activityLevel,
+    weeklyTrainingDays: String(profile.weeklyTrainingDays), trainingMinutes: String(profile.trainingMinutes),
+    equipment: profile.equipment, dietaryPattern: profile.dietaryPattern,
+    mealsPerDay: String(profile.mealsPerDay), cookingLevel: profile.cookingLevel,
+    favoriteFoods: profile.favoriteFoods.join(', '), dislikedFoods: profile.dislikedFoods.join(', '), allergies: profile.allergies.join(', '),
+    preferredCuisines: profile.preferredCuisines.join(', '), availableCookingMinutes: String(profile.availableCookingMinutes), foodBudget: profile.foodBudget,
+    weeklyFoodBudgetMxn: String(profile.weeklyFoodBudgetMxn), mealPreparationPreference: profile.mealPreparationPreference,
+    mealPrepStructure: profile.mealPrepStructure, mealPrepRotationDays: String(profile.mealPrepRotationDays), supplements: profile.supplements.join(', '),
+    trainingPreference: profile.trainingPreference, preferredSport: profile.preferredSport,
+    coachStyle: profile.coachStyle, safetyFlags: profile.safetyFlags,
+    terms: profile.consents.terms, privacy: profile.consents.privacy, ai: profile.consents.ai,
+  };
 }
 
 function Outcome({ value, label, description, draft, setDraft }: { value: Draft['bodyOutcome']; label: string; description: string; draft: Draft; setDraft(value: Draft): void }) {

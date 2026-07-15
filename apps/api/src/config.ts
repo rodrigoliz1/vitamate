@@ -1,7 +1,14 @@
 import { z } from 'zod';
 
 const optionalPositiveInteger = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  (value) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return undefined;
+
+    const normalized = value.trim();
+    return /^\d+$/.test(normalized) ? normalized : undefined;
+  },
   z.coerce.number().int().positive().optional(),
 );
 
@@ -29,12 +36,16 @@ const schema = z.object({
   STRIPE_PRICE_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ANNUAL: z.string().optional(),
   APPLE_BUNDLE_ID: z.string().default('mx.vitamate.app'),
-  // Render represents environment variables configured without a value as an
-  // empty string. Treat it as unset until App Store Connect assigns the app ID.
+  // Render can preserve empty values, quotes or deployment placeholders.
+  // Ignore anything other than the numeric ID assigned by App Store Connect.
   APPLE_APP_ID: optionalPositiveInteger,
   APPLE_ROOT_CERTIFICATES_BASE64: z.string().optional(),
   APPLE_PRODUCT_MONTHLY: z.string().default('mx.vitamate.premium.monthly'),
   APPLE_PRODUCT_ANNUAL: z.string().default('mx.vitamate.premium.annual'),
+  APNS_KEY_ID: z.string().optional(),
+  APNS_TEAM_ID: z.string().optional(),
+  APNS_PRIVATE_KEY_BASE64: z.string().optional(),
+  APNS_BUNDLE_ID: z.string().default('mx.vitamate.app'),
   BREVO_API_KEY: z.string().optional(),
   BREVO_SMTP_KEY: z.string().optional(),
   BREVO_SENDER_EMAIL: z.string().email().default('noreply@vitamate.mx'),

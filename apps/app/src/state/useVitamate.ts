@@ -25,9 +25,12 @@ import {
 import { browserLocalRepository, type VitamateSnapshot } from '../data/localRepository';
 import { fetchCloudSnapshot, reconcileCloudSnapshot } from '../services/cloudRepository';
 import { supabase, supabaseConfigured } from '../services/supabase';
-import { deleteAccount as deleteRemoteAccount, fetchBillingStatus, reconcileCheckout as reconcileStripeCheckout, registerAccount, requestAuthOtp, requestPasswordReset, type BillingEntitlement, type BillingOffer, type OtpVerificationType } from '../services/api';
+import { deleteAccount as deleteRemoteAccount, fetchBillingStatus, reconcileCheckout as reconcileStripeCheckout, registerAccount, requestAuthOtp, requestPasswordReset, resendRegistrationOtp, type BillingEntitlement, type BillingOffer, type OtpVerificationType } from '../services/api';
 import { loadBillingOffers, manageSubscription, nativeBilling, restoreSubscriptions, startSubscription } from '../services/nativeBilling';
 import { readNativeHealthSummary, supportsNativeHealth, type NativeHealthSummary } from '../services/nativeHealth';
+import type { WellnessReminder } from '../models/reminders';
+import { syncReminderNotifications } from '../services/reminders';
+import { enableRemoteNotifications } from '../services/pushNotifications';
 
 function createId(): string {
   const cryptoApi = globalThis.crypto as Crypto | undefined;
@@ -114,6 +117,10 @@ export function useVitamate() {
   useEffect(() => { void refreshBilling(); }, [refreshBilling]);
 
   useEffect(() => {
+    void syncReminderNotifications(snapshot.reminders).catch(() => undefined);
+  }, [snapshot.reminders]);
+
+  useEffect(() => {
     if (!supportsNativeHealth() || window.localStorage.getItem('vitamate.health.connected') !== 'true') return;
     void readNativeHealthSummary().then(setHealthSummary).catch(() => undefined);
   }, []);
@@ -137,6 +144,20 @@ export function useVitamate() {
     browserLocalRepository.save(next);
     setSnapshot(next);
   }, []);
+
+  useEffect(() => {
+    const complete = (event: Event) => {
+      const reminderId = (event as CustomEvent<{ reminderId?: string }>).detail?.reminderId;
+      if (!reminderId) return;
+      const now = new Date().toISOString();
+      update((current) => ({
+        ...current,
+        reminderLogs: [{ id: createId(), reminderId, completedAt: now, outcome: 'completed' as const }, ...current.reminderLogs].slice(0, 500),
+      }));
+    };
+    window.addEventListener('vitamate:reminder-completed', complete);
+    return () => window.removeEventListener('vitamate:reminder-completed', complete);
+  }, [update]);
 
   const completeOnboarding = useCallback((profile: UserProfile) => {
     const nutritionTarget = calculateNutritionTarget(profile);
@@ -261,6 +282,39 @@ export function useVitamate() {
     update((current) => ({ ...current, weightEntries: [entry, ...current.weightEntries] }));
   }, [update]);
 
+  const saveReminder = useCallback((input: Omit<WellnessReminder, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
+    const now = new Date().toISOString();
+    update((current) => {
+      const existing = input.id ? current.reminders.find((reminder) => reminder.id === input.id) : undefined;
+      const reminder: WellnessReminder = {
+        ...input,
+        id: input.id ?? createId(),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      return { ...current, reminders: existing ? current.reminders.map((item) => item.id === reminder.id ? reminder : item) : [reminder, ...current.reminders] };
+    });
+  }, [update]);
+
+  const deleteReminder = useCallback((id: string) => {
+    update((current) => ({ ...current, reminders: current.reminders.filter((reminder) => reminder.id !== id) }));
+  }, [update]);
+
+  const completeReminder = useCallback((reminderId: string, outcome: 'completed' | 'skipped' = 'completed') => {
+    const entry = { id: createId(), reminderId, completedAt: new Date().toISOString(), outcome } as const;
+    update((current) => ({ ...current, reminderLogs: [entry, ...current.reminderLogs].slice(0, 500) }));
+  }, [update]);
+
+  const enableNotifications = useCallback(async () => {
+    const permission = await syncReminderNotifications(latestSnapshot.current.reminders, true);
+    if (permission !== 'granted') throw new Error('No se concedió permiso para mostrar notificaciones. Puedes activarlo después desde Configuración.');
+    // El calendario local ya está activo en este punto. APNs es una capa
+    // adicional y puede no estar disponible en el simulador o antes del
+    // siguiente despliegue del backend, por lo que nunca invalida el permiso.
+    if (cloudUserId) await enableRemoteNotifications(cloudUserId).catch(() => undefined);
+    return permission;
+  }, [cloudUserId]);
+
   const appendCoachMessages = useCallback((messages: CoachChatMessage[]) => {
     update((current) => ({ ...current, coachMessages: [...current.coachMessages, ...messages].slice(-200) }));
   }, [update]);
@@ -328,6 +382,16 @@ export function useVitamate() {
     try {
       const response = await registerAccount({ email, password });
       setCloudMessage('Enviamos un código a tu correo.');
+      return response;
+    } finally { setCloudBusy(false); }
+  }, []);
+
+  const resendRegistrationCode = useCallback(async (email: string) => {
+    if (!supabase) throw new Error('Falta configurar Supabase en la PWA.');
+    setCloudBusy(true); setCloudMessage('');
+    try {
+      const response = await resendRegistrationOtp(email.trim().toLocaleLowerCase('es-MX'));
+      setCloudMessage('Enviamos un código nuevo a tu correo.');
       return response;
     } finally { setCloudBusy(false); }
   }, []);
@@ -510,5 +574,5 @@ export function useVitamate() {
   const billingPeriodActive = !billing?.currentPeriodEnd || Date.parse(billing.currentPeriodEnd) > Date.now();
   const isPremium = billing?.plan === 'premium' && ['active', 'trialing'].includes(billing.status) && billingPeriodActive;
 
-  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
+  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, saveReminder, deleteReminder, completeReminder, enableNotifications, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, resendRegistrationCode, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
 }

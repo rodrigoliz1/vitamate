@@ -8,7 +8,7 @@
     "hostname": "app.vitamate.mx"
   },
   "ios": {
-    "contentInset": "automatic",
+    "contentInset": "never",
     "allowsLinkPreview": false,
     "preferredContentMode": "mobile",
     "scrollEnabled": true
@@ -26,8 +26,15 @@
       "showSpinner": false
     },
     "StatusBar": {
-      "style": "dark",
+      "overlaysWebView": false,
+      "style": "light",
       "backgroundColor": "#F8F6EF"
+    },
+    "LocalNotifications": {
+      "presentationOptions": ["badge", "sound", "banner", "list"]
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "banner", "list"]
     }
   }
 }

@@ -9,9 +9,12 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "native:sync:ios": "tsc --noEmit && vite build && cap sync ios",
+    "build:ios": "tsc --noEmit && VITE_API_BASE_URL=https://api.vitamate.mx VITE_APNS_ENVIRONMENT=sandbox vite build --mode ios",
+    "build:ios:release": "tsc --noEmit && VITE_API_BASE_URL=https://api.vitamate.mx VITE_APNS_ENVIRONMENT=production vite build --mode ios",
+    "native:sync:ios": "npm run build:ios && cap sync ios",
+    "native:sync:ios:release": "npm run build:ios:release && cap sync ios",
     "native:open:ios": "cap open ios",
-    "native:run:ios": "tsc --noEmit && vite build && cap sync ios && cap run ios",
+    "native:run:ios": "npm run native:sync:ios && cap run ios",
     "native:doctor": "cap doctor"
   },
   "dependencies": {

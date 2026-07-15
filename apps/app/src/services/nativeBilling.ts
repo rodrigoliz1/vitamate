@@ -15,11 +15,19 @@ async function verify(transaction: Transaction) {
 
 export async function loadBillingOffers(webOffers: BillingOffer[]): Promise<BillingOffer[]> {
   if (!nativeBilling) return webOffers;
-  const { products } = await NativePurchases.getProducts({ productIdentifiers: Object.values(APPLE_PRODUCT_IDS), productType: PURCHASE_TYPE.SUBS });
-  return (['month', 'year'] as const).flatMap((interval) => {
-    const product = products.find((item) => item.identifier === APPLE_PRODUCT_IDS[interval]);
-    return product ? [{ interval, amount: Math.round(product.price * 100), currency: product.currencyCode, displayPrice: product.priceString, trialAvailable: Boolean(product.introductoryPrice) }] : [];
-  });
+  try {
+    const { products } = await NativePurchases.getProducts({ productIdentifiers: Object.values(APPLE_PRODUCT_IDS), productType: PURCHASE_TYPE.SUBS });
+    const nativeOffers = (['month', 'year'] as const).flatMap((interval) => {
+      const product = products.find((item) => item.identifier === APPLE_PRODUCT_IDS[interval]);
+      return product ? [{ interval, amount: Math.round(product.price * 100), currency: product.currencyCode, displayPrice: product.priceString, trialAvailable: Boolean(product.introductoryPrice) }] : [];
+    });
+    // En un simulador sin StoreKit Configuration mostramos los precios
+    // públicos del servidor como referencia. El cobro nativo sigue exigiendo
+    // que los productos existan en StoreKit/App Store Connect.
+    return nativeOffers.length ? nativeOffers : webOffers;
+  } catch {
+    return webOffers;
+  }
 }
 
 export async function startSubscription(interval: 'month' | 'year', userId: string): Promise<{ native: boolean; entitlement?: Awaited<ReturnType<typeof verify>>['entitlement'] }> {
@@ -28,7 +36,12 @@ export async function startSubscription(interval: 'month' | 'year', userId: stri
     window.location.assign(url);
     return { native: false };
   }
-  const transaction = await NativePurchases.purchaseProduct({ productIdentifier: APPLE_PRODUCT_IDS[interval], productType: PURCHASE_TYPE.SUBS, appAccountToken: userId });
+  let transaction: Transaction;
+  try {
+    transaction = await NativePurchases.purchaseProduct({ productIdentifier: APPLE_PRODUCT_IDS[interval], productType: PURCHASE_TYPE.SUBS, appAccountToken: userId });
+  } catch (error) {
+    throw new Error(`No fue posible abrir la compra de App Store. Verifica que ${APPLE_PRODUCT_IDS[interval]} esté disponible en StoreKit o App Store Connect. (${error instanceof Error ? error.message : 'producto no disponible'})`);
+  }
   const result = await verify(transaction);
   return { native: true, entitlement: result.entitlement };
 }

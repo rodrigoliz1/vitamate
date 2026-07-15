@@ -65,8 +65,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/v1/auth/request-password-reset', async (request, reply) => {
     const body = z.object({ email: emailSchema }).parse(request.body);
-    if (!await allowPersistentRequest(`auth-recovery:${request.ip}:${body.email}`, 4, 15 * 60_000)) {
-      return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera un momento antes de solicitar otro código.' });
+    if (!await allowPersistentRequest(`auth-recovery:${request.ip}:${body.email}`, 1, 45_000)) {
+      return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera 45 segundos antes de solicitar otro código.' });
     }
     const result = await requireSupabase().auth.admin.generateLink({
       type: 'recovery',
@@ -83,6 +83,24 @@ export async function authRoutes(app: FastifyInstance) {
     if (!otp) throw new Error('Supabase no generó el código de recuperación.');
     await emailProvider.sendOtp({ email: body.email, otp, preferredName: 'atleta' });
     return { sent: true, delivery: 'otp' as const, verificationType: 'recovery' as const };
+  });
+
+  app.post('/v1/auth/resend-registration-code', async (request, reply) => {
+    const body = z.object({ email: emailSchema }).parse(request.body);
+    if (!await allowPersistentRequest(`auth-register-resend:${request.ip}:${body.email}`, 1, 45_000)) {
+      return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera 45 segundos antes de solicitar otro código.' });
+    }
+    const result = await requireSupabase().auth.admin.generateLink({
+      type: 'magiclink', email: body.email,
+      options: { redirectTo: config.PUBLIC_APP_URL },
+    });
+    if (result.error || !result.data.properties?.email_otp) throw result.error ?? new Error('Supabase no generó el código de verificación.');
+    await emailProvider.sendOtp({ email: body.email, otp: result.data.properties.email_otp, preferredName: 'atleta' });
+    return {
+      sent: true,
+      delivery: 'otp' as const,
+      verificationType: result.data.properties.verification_type === 'signup' ? 'signup' as const : 'email' as const,
+    };
   });
 
   app.post('/v1/auth/request-otp', async (request, reply) => {

@@ -11,6 +11,7 @@ import { nutritionRoutes } from './routes/nutrition.js';
 import { marketPriceRoutes } from './routes/marketPrices.js';
 import { billingRoutes } from './routes/billing.js';
 import { authRoutes } from './routes/auth.js';
+import { notificationRoutes } from './routes/notifications.js';
 
 const app = Fastify({ logger: true, bodyLimit: 7_000_000, trustProxy: config.TRUST_PROXY });
 const configuredOrigins = new Set(config.APP_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean));
@@ -46,4 +47,5 @@ await app.register(nutritionRoutes);
 await app.register(marketPriceRoutes);
 await app.register(billingRoutes);
 await app.register(authRoutes);
+await app.register(notificationRoutes);
 await app.listen({ host: '0.0.0.0', port: config.PORT });

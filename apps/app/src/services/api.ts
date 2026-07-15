@@ -1,7 +1,10 @@
 import type { AppLocale, CoachChatMessage, CoachMemory, CoachMemoryUpdate, FoodCatalogItem, GroceryEstimate, GroceryEstimateRequest, HealthDocumentSummary, MealPlanOption, NutritionTarget, UserProfile, WorkoutSession } from '@vitamate/domain';
 import { supabase } from './supabase';
 
-const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? 'http://localhost:3001';
+// Production and native builds must never fall back to loopback: on an iPhone,
+// localhost is the phone itself. Local development explicitly overrides this
+// value through apps/app/.env.local.
+const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? 'https://api.vitamate.mx';
 
 function apiBaseUrl(): string {
   if (typeof window === 'undefined') return configuredBaseUrl.replace(/\/v1$/, '');
@@ -40,6 +43,9 @@ export type OtpVerificationType = 'email' | 'signup' | 'recovery';
 export type OtpDelivery = 'otp' | 'magic_link';
 export async function registerAccount(input: { email: string; password: string }): Promise<{ sent: true; verificationType: 'signup'; delivery: 'otp' }> {
   return request('/v1/auth/register', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function resendRegistrationOtp(email: string): Promise<{ sent: true; verificationType: OtpVerificationType; delivery: 'otp' }> {
+  return request('/v1/auth/resend-registration-code', { method: 'POST', body: JSON.stringify({ email }) });
 }
 export async function requestPasswordReset(email: string): Promise<{ sent: true; verificationType: 'recovery'; delivery: 'otp' }> {
   return request('/v1/auth/request-password-reset', { method: 'POST', body: JSON.stringify({ email }) });
@@ -84,6 +90,10 @@ export async function createBillingPortal(returnUrl: string): Promise<{ url: str
 
 export function verifyApplePurchase(input: { transactionId: string; jwsRepresentation: string }): Promise<{ entitlement: BillingEntitlement }> {
   return request('/v1/billing/apple/verify', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function registerPushDevice(input: { token: string; platform: 'ios'; environment: 'sandbox' | 'production' }): Promise<{ registered: true }> {
+  return request('/v1/notifications/devices', { method: 'POST', body: JSON.stringify({ ...input, locale: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
 }
 
 export async function searchFoods(query: string, external = false): Promise<FoodCatalogItem[]> {

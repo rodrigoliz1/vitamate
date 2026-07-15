@@ -11,6 +11,7 @@ import { generateStarterWorkoutPlan, generateWeeklyMealPlan, weeklyMealPlanForDa
   WorkoutSession,
   WeeklyMealPlan,
 } from '@vitamate/domain';
+import type { ReminderLog, WellnessReminder } from '../models/reminders';
 
 export interface VitamateSnapshot {
   schemaVersion: 5;
@@ -24,6 +25,8 @@ export interface VitamateSnapshot {
   coachMessages: CoachChatMessage[];
   coachMemories: CoachMemory[];
   healthDocuments: HealthDocumentSummary[];
+  reminders: WellnessReminder[];
+  reminderLogs: ReminderLog[];
   mealPlans: WeeklyMealPlan[];
   planSelectionCompleted: boolean;
   cloudUpdatedAt?: string;
@@ -43,6 +46,8 @@ const EMPTY: VitamateSnapshot = {
   coachMessages: [],
   coachMemories: [],
   healthDocuments: [],
+  reminders: [],
+  reminderLogs: [],
   mealPlans: [],
   planSelectionCompleted: false,
 };
@@ -96,6 +101,8 @@ export function normalizeVitamateSnapshot(value: Omit<Partial<VitamateSnapshot>,
     coachMessages: value.coachMessages ?? [],
     coachMemories: value.coachMemories ?? [],
     healthDocuments: value.healthDocuments ?? [],
+    reminders: value.reminders ?? [],
+    reminderLogs: value.reminderLogs ?? [],
     mealPlans: mealPlans.slice(-8),
     planSelectionCompleted: value.planSelectionCompleted ?? (Boolean(value.profile) && (value.schemaVersion ?? 0) < 5),
   };
@@ -103,7 +110,7 @@ export function normalizeVitamateSnapshot(value: Omit<Partial<VitamateSnapshot>,
 
 export const browserLocalRepository = {
   empty(): VitamateSnapshot {
-    return { ...EMPTY, meals: [], personalFoods: [], workoutSessions: [], weightEntries: [], coachMessages: [], coachMemories: [], healthDocuments: [], mealPlans: [] };
+    return { ...EMPTY, meals: [], personalFoods: [], workoutSessions: [], weightEntries: [], coachMessages: [], coachMemories: [], healthDocuments: [], reminders: [], reminderLogs: [], mealPlans: [] };
   },
   load(): VitamateSnapshot {
     if (typeof window === 'undefined') return EMPTY;

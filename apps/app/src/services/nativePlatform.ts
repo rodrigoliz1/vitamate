@@ -5,6 +5,7 @@ import { Network } from '@capacitor/network';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { supabase } from './supabase';
+import { initializeReminderNotifications } from './reminders';
 
 export const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
 
@@ -16,7 +17,7 @@ async function handleDeepLink(urlString: string): Promise<void> {
   const path = url.protocol === 'mx.vitamate:'
     ? (url.host === 'auth' ? '/hoy' : `/${url.host}${url.pathname}`)
     : url.pathname;
-  const allowed = new Set(['/hoy', '/nutricion', '/plan-semanal', '/entrenar', '/coach', '/progreso', '/cuenta']);
+  const allowed = new Set(['/hoy', '/nutricion', '/plan-semanal', '/entrenar', '/coach', '/progreso', '/cuenta', '/recordatorios']);
   const destination = allowed.has(path) ? path : '/hoy';
   window.history.replaceState({}, '', `${destination}${url.searchParams.has('checkout') ? url.search : ''}`);
   window.dispatchEvent(new PopStateEvent('popstate'));
@@ -26,9 +27,12 @@ export async function initializeNativePlatform(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   document.documentElement.classList.add('capacitor-native', `capacitor-${Capacitor.getPlatform()}`);
   await Promise.allSettled([
-    StatusBar.setStyle({ style: Style.Dark }),
+    StatusBar.setStyle({ style: Style.Light }),
+    StatusBar.setOverlaysWebView({ overlay: false }),
+    StatusBar.setBackgroundColor({ color: '#F8F6EF' }),
     Keyboard.setAccessoryBarVisible({ isVisible: true }),
   ]);
+  await initializeReminderNotifications().catch(() => undefined);
   const updateNetwork = (connected: boolean) => {
     document.documentElement.classList.toggle('native-offline', !connected);
     window.dispatchEvent(new CustomEvent('vitamate:network', { detail: { connected } }));
