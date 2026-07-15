@@ -1,0 +1,14 @@
+{
+  "name": "@vitamate/ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}

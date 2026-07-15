@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.turbo/
+.pnpm-store/
+.DS_Store
+*.tsbuildinfo
+
+# Copias de conflicto/sincronización creadas por Finder/iCloud. El código activo
+# no lleva el sufijo " 2"; no deben publicarse en el repositorio.
+* 2.*
+**/* 2.*
+
+# Entorno local: nunca versionar credenciales ni configuración del equipo.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Estado local de herramientas.
+supabase/.temp/
+*.log

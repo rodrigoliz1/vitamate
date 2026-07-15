@@ -1,0 +1,39 @@
+* { box-sizing: border-box; }
+:root {
+  --vita-surface: #ffffff;
+  --vita-surface-soft: #edf3ed;
+  --vita-surface-translucent: rgba(255, 255, 255, .86);
+  --vita-action: #2f5233;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --vita-forest: #78a980;
+  --vita-forest-deep: #bad7be;
+  --vita-sage: #91b596;
+  --vita-sage-soft: #273a2d;
+  --vita-peach: #e0bda7;
+  --vita-peach-soft: #3a2d26;
+  --vita-navy: #aac3d5;
+  --vita-cream: #101713;
+  --vita-white: #19231c;
+  --vita-surface: #19231c;
+  --vita-surface-soft: #223127;
+  --vita-surface-translucent: rgba(25, 35, 28, .9);
+  --vita-action: #3f6c47;
+  --vita-ink: #edf5ee;
+  --vita-muted: #aab8ad;
+  --vita-line: #34443a;
+  --vita-danger: #ef9993;
+  --vita-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+  --ion-background-color: var(--vita-cream);
+  --ion-text-color: var(--vita-ink);
+  --ion-color-primary: var(--vita-action);
+  --ion-color-primary-rgb: 63, 108, 71;
+}
+html { background: var(--vita-cream, #f7f5ef); }
+body { margin: 0; min-width: 320px; color: var(--vita-ink, #183024); background: var(--vita-cream, #f7f5ef); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input, select { font: inherit; }
+button { color: inherit; }
+h1, h2, h3, p { margin-top: 0; }
+a { color: inherit; }
+::selection { color: white; background: #5a7d5e; }

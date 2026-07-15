@@ -1,0 +1,22 @@
+:root {
+  --vita-forest: #2f5233;
+  --vita-forest-deep: #1f3b27;
+  --vita-sage: #5a7d5e;
+  --vita-sage-soft: #dce8dc;
+  --vita-peach: #e6c7b2;
+  --vita-peach-soft: #f5e8de;
+  --vita-navy: #1a2e3e;
+  --vita-cream: #f7f5ef;
+  --vita-white: #ffffff;
+  --vita-ink: #183024;
+  --vita-muted: #66736a;
+  --vita-line: #dfe5df;
+  --vita-danger: #9d3434;
+  --vita-shadow: 0 18px 50px rgba(31, 59, 39, 0.1);
+  --vita-radius-lg: 28px;
+  --vita-radius-md: 18px;
+  --vita-radius-sm: 12px;
+  --ion-color-primary: var(--vita-forest);
+  --ion-color-primary-rgb: 47, 82, 51;
+  --ion-color-primary-contrast: #ffffff;
+}

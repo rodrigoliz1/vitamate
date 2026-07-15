@@ -1,0 +1,8 @@
+{
+  "name": "@vitamate/design-tokens",
+  "private": true,
+  "version": "1.0.0",
+  "exports": {
+    "./index.css": "./index.css"
+  }
+}

@@ -1,0 +1,9 @@
+import type { Metadata } from "next";
+import { PageShell } from "@/components/PageShell";
+import { Reveal } from "@/components/Reveal";
+
+export const metadata: Metadata = { title: "Nosotros", description: "La misión y los principios detrás de VITAMATE." };
+
+export default function AboutPage() {
+  return <PageShell><section className="about-hero"><div className="section-shell"><Reveal><span className="eyebrow light">Vitamina + mate</span><h1>Vitalidad con<br /><em>compañía.</em></h1><p>VITAMATE nació de una convicción sencilla: la mejor rutina no es la más rígida, sino la que entiende a la persona que intenta vivirla.</p></Reveal></div></section><section className="about-story section-shell"><Reveal><span className="eyebrow">Nuestra misión</span><h2>Convertir la información en acompañamiento cotidiano.</h2></Reveal><Reveal delay={90}><div className="story-copy"><p>Entrenar, comer y recuperarse están conectados. Sin embargo, muchas herramientas los fragmentan y exigen que el usuario se adapte a ellas. VITAMATE busca invertir esa relación.</p><p>Construimos una experiencia en la que la tecnología propone, explica y recuerda, pero la persona conserva la decisión. Queremos que cada registro sirva para comprender, no para castigar.</p></div></Reveal></section><section className="principles section-shell">{[["01", "Practicidad", "Una recomendación sólo es útil si puede hacerse en tu horario, presupuesto y contexto."], ["02", "Transparencia", "Mostramos fuentes, supuestos, confianza y límites; no disfrazamos estimaciones de hechos."], ["03", "Autonomía", "Tú corriges, cambias, borras y decides. La IA acompaña; no reemplaza tu criterio."], ["04", "Continuidad", "El progreso se observa en semanas y tendencias, no en un momento aislado."]].map(([n,t,d], i) => <Reveal key={n} delay={i*60}><article><span>{n}</span><h3>{t}</h3><p>{d}</p></article></Reveal>)}</section></PageShell>;
+}

@@ -1,0 +1,41 @@
+{
+  "name": "vitamate-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/core": "^5.7.0",
+    "@ionic/react": "^7.7.4",
+    "@ionic/react-router": "^7.7.4",
+    "@supabase/supabase-js": "^2.49.4",
+    "@vitamate/design-tokens": "workspace:*",
+    "@vitamate/domain": "workspace:*",
+    "@vitamate/ui": "workspace:*",
+    "ionicons": "^7.2.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^5.3.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^5.7.0",
+    "@eslint/js": "^9",
+    "@types/node": "^20.11.20",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitamate/config": "workspace:*",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^9",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8",
+    "vite": "^5.1.4",
+    "vite-plugin-pwa": "^0.19.2"
+  }
+}

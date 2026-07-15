@@ -1,0 +1,11 @@
+{
+  "name": "@vitamate/config",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.base.js",
+    "./prettier": "./prettier.base.json",
+    "./tsconfig": "./tsconfig.base.json"
+  }
+}

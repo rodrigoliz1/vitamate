@@ -1,0 +1,18 @@
+import type { Metadata } from "next";
+import { LegalPage } from "@/components/LegalPage";
+
+export const metadata: Metadata = { title: "Aviso de privacidad", description: "Aviso de privacidad integral de VITAMATE." };
+
+export default function PrivacyPage() {
+  return <LegalPage eyebrow="Privacidad" title="Aviso de privacidad integral" updated="Última actualización: 14 de julio de 2026" sections={[
+    ["1. Identidad y contacto", <><p>VITAMATE, con sitio web en vitamate.mx, es responsable del tratamiento de los datos personales recabados mediante su sitio y aplicación. Para asuntos de privacidad y ejercicio de derechos, escribe a <a href="mailto:privacidad@vitamate.mx">privacidad@vitamate.mx</a>.</p><p>Antes del inicio comercial se incorporará el domicilio definitivo del responsable y cualquier información registral exigible.</p></>],
+    ["2. Datos que podemos tratar", <><p>Datos de cuenta y contacto; perfil, edad y preferencias; objetivos de bienestar; registros de alimentación, actividad, peso y percepción de esfuerzo; conversaciones con VITACOACH; imágenes de alimentos y documentos que decidas adjuntar; datos técnicos, de sesión y suscripción.</p><p>No debes cargar expedientes que no sean tuyos ni información de terceros sin autorización.</p></>],
+    ["3. Finalidades", <><p>Crear y administrar tu cuenta; personalizar planes y seguimiento; procesar registros solicitados; mantener memoria conversacional útil; prestar soporte; resguardar historial; prevenir fraude; gestionar pagos; mejorar seguridad y calidad; cumplir obligaciones legales.</p><p>Los datos de bienestar no se usarán para tomar decisiones laborales, crediticias o aseguradoras.</p></>],
+    ["4. Inteligencia artificial y estimaciones", <><p>Las entradas que envías a VITACOACH pueden ser procesadas por proveedores tecnológicos para generar respuestas. Los resultados nutricionales, visuales y de entrenamiento son aproximaciones que requieren criterio del usuario. VITAMATE no realiza diagnósticos.</p></>],
+    ["5. Encargados y transferencias", <><p>Podemos usar servicios de infraestructura, autenticación y base de datos (Supabase), procesamiento de IA (OpenAI), cobros (Stripe), correo transaccional (Brevo), medios y almacenamiento. Cada proveedor sólo recibirá la información necesaria para su función, conforme a contratos y medidas aplicables.</p><p>No vendemos datos personales. Las transferencias exigidas por autoridad competente se realizarán conforme a derecho.</p></>],
+    ["6. Conservación y seguridad", <><p>Conservamos datos mientras la cuenta permanezca activa y después durante el plazo necesario para obligaciones legales, resolución de controversias y respaldo. Aplicamos controles de acceso, separación de secretos, conexiones cifradas y políticas por usuario; ningún sistema es infalible.</p></>],
+    ["7. Derechos ARCO y revocación", <><p>Puedes solicitar acceso, rectificación, cancelación u oposición, revocar consentimiento o limitar uso enviando nombre, medio de respuesta, derecho solicitado y elementos que permitan localizar la información a privacidad@vitamate.mx. Podremos pedir acreditación razonable de identidad.</p></>],
+    ["8. Cookies y almacenamiento local", <><p>Usamos almacenamiento local y tecnologías necesarias para mantener sesión, preferencias, funcionamiento offline, seguridad y la guía de instalación. Cualquier analítica no esencial deberá ofrecer controles y avisos adicionales antes de activarse.</p></>],
+    ["9. Cambios", <><p>Las modificaciones materiales se publicarán en esta página y, cuando corresponda, se comunicarán dentro de la aplicación o por correo.</p></>],
+  ]} />;
+}
