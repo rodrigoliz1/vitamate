@@ -18,6 +18,7 @@ import { PlanSelection } from './components/PlanSelection';
 import { PremiumGate } from './components/PremiumGate';
 import { SubscriptionModal } from './components/SubscriptionModal';
 import { SubscriptionCelebration } from './components/SubscriptionCelebration';
+import { BrandMark } from './components/BrandMark';
 import type { BillingEntitlement } from './services/api';
 import { resolveUiLocale, type ColorTheme } from './config/appFeatures';
 import Coach from './pages/Coach';
@@ -54,6 +55,14 @@ function initialPendingProfile(): UserProfile | null {
 function initialPendingEmail(): string | null {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(pendingEmailStorageKey);
+}
+
+function AppBootScreen() {
+  return <IonApp><main className="app-boot-screen" aria-label="Preparando VITAMATE">
+    <div className="app-boot-halo"><BrandMark /></div>
+    <p>Preparando tu experiencia</p>
+    <span className="app-boot-dots" aria-hidden="true"><i /><i /><i /></span>
+  </main></IonApp>;
 }
 
 const App: React.FC = () => {
@@ -134,7 +143,7 @@ const App: React.FC = () => {
     void confirm();
     return () => { cancelled = true; };
   }, [actions.cloud.email, actions.completePlanSelection, actions.reconcileCheckout, actions.refreshBilling]);
-  if (!actions.cloud.sessionReady) return <IonApp />;
+  if (!actions.cloud.sessionReady) return <AppBootScreen />;
   if (!actions.cloud.email) return <IonApp><SignupJourney
     busy={actions.cloud.busy}
     message={actions.cloud.message}
@@ -157,9 +166,9 @@ const App: React.FC = () => {
     onResetPassword={actions.resetPasswordWithOtp}
     onVerify={actions.verifyOtp}
   /></IonApp>;
-  if (!actions.cloud.snapshotReady) return <IonApp />;
+  if (!actions.cloud.snapshotReady) return <AppBootScreen />;
   if (!snapshot.profile) return <IonApp><Onboarding onComplete={actions.completeOnboarding} /></IonApp>;
-  if (!snapshot.planSelectionCompleted) return <IonApp><PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} native={actions.billing.native} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onComplete={actions.completePlanSelection} /></IonApp>;
+  if (!snapshot.planSelectionCompleted) return <IonApp><PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onComplete={actions.completePlanSelection} /></IonApp>;
   const english = resolveUiLocale(snapshot.profile.locale) === 'en-US';
   const premium = actions.billing.isPremium;
   const requirePremium = () => setSubscriptionOpen(true);
@@ -179,6 +188,7 @@ const App: React.FC = () => {
             <Route exact path="/cuenta" render={() => <Cuenta snapshot={snapshot} cloudEmail={actions.cloud.email} entitlement={actions.billing.entitlement} onOpenSubscription={requirePremium} onDeleteAccount={actions.deleteAccount} />} />
             <Route exact path="/recordatorios" render={() => <Recordatorios snapshot={snapshot} onSave={actions.saveReminder} onDelete={actions.deleteReminder} onComplete={actions.completeReminder} onEnableNotifications={actions.enableNotifications} />} />
             <Route exact path="/"><Redirect to="/hoy" /></Route>
+            <Route><Redirect to="/hoy" /></Route>
           </IonRouterOutlet>
           <IonTabBar slot="bottom" className="app-tab-bar">
             <IonTabButton tab="hoy" href="/hoy"><IonIcon icon={home} /><IonLabel>{english ? 'Today' : 'Hoy'}</IonLabel></IonTabButton>
@@ -188,7 +198,7 @@ const App: React.FC = () => {
             <IonTabButton tab="progreso" href={premium ? '/progreso' : undefined} onClick={premium ? undefined : requirePremium}><IonIcon icon={trendingUp} /><IonLabel>{english ? 'Progress' : 'Progreso'}</IonLabel>{!premium && <IonIcon className="tab-lock" icon={lockClosed} />}</IonTabButton>
           </IonTabBar>
         </IonTabs>
-        <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} native={actions.billing.native} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onLeavingForCheckout={actions.completePlanSelection} />
+        <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onLeavingForCheckout={actions.completePlanSelection} />
         {celebration && <SubscriptionCelebration entitlement={celebration} isOpen onDismiss={() => setCelebration(null)} />}
       </IonReactRouter>
     </IonApp>

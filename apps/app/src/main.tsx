@@ -6,8 +6,12 @@ import { initializeNativePlatform } from './services/nativePlatform';
 import './index.css';
 
 void initializeNativePlatform();
-if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => { void navigator.serviceWorker.register('/sw.js'); }, { once: true });
+if (import.meta.env.PROD && !Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      console.warn('No se pudo registrar el service worker.', error);
+    });
+  }, { once: true });
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

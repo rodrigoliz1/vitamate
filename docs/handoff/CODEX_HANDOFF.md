@@ -166,7 +166,6 @@ STRIPE_PRICE_ANNUAL=
 BREVO_API_KEY=
 BREVO_SMTP_KEY=
 BREVO_SENDER_EMAIL=
-REQUIRE_COACH_AUTH=true
 PROFECO_QQP_SOURCE_URL=
 INEGI_INPC_SOURCE=calculator
 ```
@@ -291,7 +290,7 @@ No introducir un segundo sistema de posicionamiento (`fixed` + `IonFooter` + `Vi
 
 1. Resolver y probar la interfaz móvil de VITACOACH anterior.
 2. Desplegar Vercel/Render; configurar DNS, HTTPS, CORS, `APP_ORIGIN`, secretos y dominios.
-3. Activar `REQUIRE_COACH_AUTH=true`; revisar RLS con dos usuarios y límites persistentes.
+3. Revisar la autenticación obligatoria de VITACOACH, RLS con dos usuarios y límites persistentes.
 4. Programar importación semanal PROFECO y mensual INPC con alertas de fallos.
 5. Revisión formal por entrenador/fisioterapeuta de imágenes y rutinas; por nutriólogo de recetas, macros, alergias y reglas de fatiga; por abogado mexicano de legal/privacidad/ARCO.
 6. Completar datos reales de responsable, razón social, domicilio, ARCO, cookies y conservación de datos en documentos legales. La eliminación dentro de la app ya está implementada.

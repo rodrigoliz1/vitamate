@@ -32,6 +32,8 @@ import type { WellnessReminder } from '../models/reminders';
 import { syncReminderNotifications } from '../services/reminders';
 import { enableRemoteNotifications } from '../services/pushNotifications';
 
+const localSnapshotOwnerKey = 'vitamate.snapshot.owner.v1';
+
 function createId(): string {
   const cryptoApi = globalThis.crypto as Crypto | undefined;
   if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
@@ -54,6 +56,7 @@ export function useVitamate() {
   const [cloudSnapshotReady, setCloudSnapshotReady] = useState(!supabase);
   const [billing, setBilling] = useState<BillingEntitlement | null>(null);
   const [billingOffers, setBillingOffers] = useState<BillingOffer[]>([]);
+  const [billingConfigured, setBillingConfigured] = useState<boolean | null>(null);
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingMessage, setBillingMessage] = useState('');
   const [healthSummary, setHealthSummary] = useState<NativeHealthSummary | null>(null);
@@ -74,20 +77,35 @@ export function useVitamate() {
       setCloudUserId(session?.user.id ?? null);
       if (!session) { if (!cancelled) setCloudSnapshotReady(true); return; }
       if (!cancelled) setCloudSnapshotReady(false);
+      const localOwner = window.localStorage.getItem(localSnapshotOwnerKey);
+      const ownerMismatch = Boolean(localOwner && localOwner !== session.user.id);
+      if (ownerMismatch && !cancelled) {
+        const empty = browserLocalRepository.empty();
+        latestSnapshot.current = empty;
+        setSnapshot(empty);
+        browserLocalRepository.save(empty);
+        window.localStorage.setItem(localSnapshotOwnerKey, session.user.id);
+      }
+      // Snapshots created before account scoping are adopted once by the
+      // first authenticated account after this migration.
+      if (!localOwner) window.localStorage.setItem(localSnapshotOwnerKey, session.user.id);
       try {
         const remote = await fetchCloudSnapshot(session.user.id);
         if (!cancelled && remote) {
           latestSnapshot.current = remote;
           setSnapshot(remote);
           browserLocalRepository.save(remote);
-        } else if (!cancelled && !latestSnapshot.current.profile) {
+          window.localStorage.setItem(localSnapshotOwnerKey, session.user.id);
+        } else if (!cancelled && (ownerMismatch || !latestSnapshot.current.profile)) {
           const empty = browserLocalRepository.empty();
           latestSnapshot.current = empty;
           setSnapshot(empty);
           browserLocalRepository.save(empty);
+          window.localStorage.setItem(localSnapshotOwnerKey, session.user.id);
         }
       } catch {
-        // Si la red falla, no destruimos el historial local disponible.
+        // Si la red falla conservamos únicamente los datos que ya estaban
+        // asociados a esta cuenta; nunca exponemos los de otra persona.
       } finally {
         if (!cancelled) setCloudSnapshotReady(true);
       }
@@ -105,9 +123,12 @@ export function useVitamate() {
     try {
       const result = await fetchBillingStatus();
       setBilling(result.entitlement);
-      setBillingOffers(await loadBillingOffers(result.offers).catch(() => nativeBilling ? [] : result.offers));
+      const offers = await loadBillingOffers(result.offers).catch(() => nativeBilling ? [] : result.offers);
+      setBillingOffers(offers);
+      setBillingConfigured(nativeBilling ? offers.length > 0 : result.configured);
       return result.entitlement;
     } catch (error) {
+      setBillingConfigured(null);
       setBillingMessage(error instanceof Error ? error.message : 'No fue posible consultar tu suscripción.');
       return null;
     }
@@ -483,7 +504,8 @@ export function useVitamate() {
   const openSubscriptionManagement = useCallback(async () => {
     setBillingBusy(true); setBillingMessage('');
     try {
-      if (nativeBilling && billing?.source === 'stripe') {
+      const webPurchase = billing?.source === 'stripe' || (billing?.source !== 'apple' && Boolean(billing?.stripeCustomerId));
+      if (nativeBilling && webPurchase) {
         throw new Error('Este plan fue adquirido en vitamate.mx. Adminístralo desde el sitio web donde realizaste la compra.');
       }
       await manageSubscription();
@@ -519,6 +541,7 @@ export function useVitamate() {
       const result = await reconcileCloudSnapshot(cloudUserId, snapshot);
       lastAutoSyncedAt.current = result.snapshot.cloudUpdatedAt ?? null;
       setSnapshot(result.snapshot); browserLocalRepository.save(result.snapshot);
+      window.localStorage.setItem(localSnapshotOwnerKey, cloudUserId);
       setCloudMessage(result.direction === 'uploaded' ? 'Tus datos locales se guardaron en la nube.' : 'Recuperamos la copia más reciente de la nube.');
     } finally { setCloudBusy(false); }
   }, [cloudUserId, snapshot]);
@@ -535,6 +558,7 @@ export function useVitamate() {
           lastAutoSyncedAt.current = result.snapshot.cloudUpdatedAt ?? null;
           setSnapshot(result.snapshot);
           browserLocalRepository.save(result.snapshot);
+          window.localStorage.setItem(localSnapshotOwnerKey, cloudUserId);
         } else {
           lastAutoSyncedAt.current = sourceUpdatedAt;
           shouldRetry = true;
@@ -564,6 +588,7 @@ export function useVitamate() {
       await supabase.auth.signOut({ scope: 'local' });
       const empty = browserLocalRepository.empty();
       browserLocalRepository.save(empty);
+      window.localStorage.removeItem(localSnapshotOwnerKey);
       latestSnapshot.current = empty;
       setSnapshot(empty);
       setBilling(null);
@@ -574,5 +599,5 @@ export function useVitamate() {
   const billingPeriodActive = !billing?.currentPeriodEnd || Date.parse(billing.currentPeriodEnd) > Date.now();
   const isPremium = billing?.plan === 'premium' && ['active', 'trialing'].includes(billing.status) && billingPeriodActive;
 
-  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, saveReminder, deleteReminder, completeReminder, enableNotifications, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, resendRegistrationCode, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
+  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, saveReminder, deleteReminder, completeReminder, enableNotifications, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, resendRegistrationCode, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, configured: billingConfigured, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, refresh: refreshBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
 }

@@ -1,9 +1,21 @@
 import { supabaseAdmin } from './supabase.js';
 
 const buckets = new Map<string, number[]>();
+const MAX_IN_MEMORY_BUCKET_AGE_MS = 15 * 60_000;
+let lastCleanupAt = 0;
+
+function cleanupBuckets(now: number): void {
+  if (now - lastCleanupAt < 60_000 && buckets.size < 10_000) return;
+  lastCleanupAt = now;
+  for (const [key, timestamps] of buckets) {
+    const latest = timestamps[timestamps.length - 1] ?? 0;
+    if (now - latest >= MAX_IN_MEMORY_BUCKET_AGE_MS) buckets.delete(key);
+  }
+}
 
 export function allowRequest(key: string, limit: number, windowMs = 60_000): boolean {
   const now = Date.now();
+  cleanupBuckets(now);
   const recent = (buckets.get(key) ?? []).filter((time) => now - time < windowMs);
   if (recent.length >= limit) { buckets.set(key, recent); return false; }
   recent.push(now); buckets.set(key, recent); return true;

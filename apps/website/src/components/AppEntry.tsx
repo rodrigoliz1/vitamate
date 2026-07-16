@@ -3,7 +3,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:4174";
+const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:5173";
+
+function shouldShowIosInstallGuide(): boolean {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return ios && !standalone;
+}
 
 export function AppEntry({ children = "Ingresar", className = "button button-primary" }: { children?: ReactNode; className?: string }) {
   const [open, setOpen] = useState(false);
@@ -20,7 +28,7 @@ export function AppEntry({ children = "Ingresar", className = "button button-pri
   }, [open]);
 
   function enterApp() {
-    if (window.localStorage.getItem("vitamate-install-guide-seen") === "1") {
+    if (window.localStorage.getItem("vitamate-install-guide-seen") === "1" || !shouldShowIosInstallGuide()) {
       window.location.assign(appUrl);
       return;
     }

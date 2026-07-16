@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { FoodRepository } from '../repositories/foodRepository.js';
 import { OpenAiFoodVisionProvider } from '../providers/openaiFoodVision.js';
@@ -8,6 +9,8 @@ import { allowPersistentRequest } from '../services/rateLimit.js';
 import { toPublicFood } from '../types.js';
 import { requireUser } from '../services/auth.js';
 import { requirePremium } from '../repositories/billingRepository.js';
+import { recordAiUsage } from '../services/openaiUsage.js';
+import { enrichPhotoFoodAnalysis } from '../services/photoFoodEnrichment.js';
 
 const repository = new FoodRepository();
 const off = new OpenFoodFactsProvider();
@@ -40,7 +43,15 @@ export async function foodRoutes(app: FastifyInstance) {
     const { userId } = await requireUser(request);
     await requirePremium(userId);
     if (!await allowPersistentRequest(`photo:${userId}`, 6)) return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera antes de analizar otra fotografía.' });
-    const body = z.object({ imageDataUrl: z.string().max(7_000_000), locale: z.enum(['es-MX', 'en-US']).default('es-MX') }).parse(request.body);
-    return { analysis: await vision.analyze(body.imageDataUrl, body.locale) };
+    const body = z.object({
+      imageDataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(7_000_000),
+      locale: z.enum(['es-MX', 'en-US']).default('es-MX'),
+    }).parse(request.body);
+    const result = await vision.analyze(body.imageDataUrl, body.locale, createHash('sha256').update(`vitamate:${userId}`).digest('hex'));
+    const analysis = await enrichPhotoFoodAnalysis(result.analysis, body.locale);
+    request.log.info({ userId, model: result.model, usage: result.usage }, 'Consumo de análisis de alimento');
+    await recordAiUsage({ userId, task: 'food_photo', model: result.model, usage: result.usage, metadata: { imageBytesApprox: Math.round(body.imageDataUrl.length * 0.75) } })
+      .catch((error) => request.log.warn({ error, userId }, 'No fue posible guardar la telemetría de la fotografía.'));
+    return { analysis };
   });
 }

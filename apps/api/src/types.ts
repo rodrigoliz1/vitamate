@@ -29,12 +29,17 @@ export interface NormalizedFood {
 export interface PhotoFoodAnalysis {
   items: Array<{
     name: string;
+    brand: string | null;
+    barcode: string | null;
     estimatedPortionG: number;
     calories: number;
     proteinG: number;
     carbohydratesG: number;
     fatG: number;
     confidence: number;
+    dataSource?: FoodSource | 'vision';
+    databaseMatchName?: string | null;
+    databaseMatchConfidence?: number | null;
   }>;
   totals: { calories: number; proteinG: number; carbohydratesG: number; fatG: number };
   overallConfidence: number;

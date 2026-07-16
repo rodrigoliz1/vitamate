@@ -4,20 +4,25 @@
   "webDir": "dist",
   "backgroundColor": "#F8F6EF",
   "server": {
-    "iosScheme": "https",
+    "iosScheme": "capacitor",
     "hostname": "app.vitamate.mx"
   },
   "ios": {
     "contentInset": "never",
     "allowsLinkPreview": false,
     "preferredContentMode": "mobile",
+    "zoomEnabled": false,
     "scrollEnabled": true
   },
   "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
     "Keyboard": {
-      "resize": "native",
+      "resize": "ionic",
       "style": "light",
-      "resizeOnFullScreen": true
+      "resizeOnFullScreen": true,
+      "autoBackdropColor": "auto"
     },
     "SplashScreen": {
       "launchShowDuration": 1200,

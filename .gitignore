@@ -9,6 +9,8 @@ dist/
 # no lleva el sufijo " 2"; no deben publicarse en el repositorio.
 * 2.*
 **/* 2.*
+* 3.*
+**/* 3.*
 
 # Entorno local: nunca versionar credenciales ni configuración del equipo.
 .env

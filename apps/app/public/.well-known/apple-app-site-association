@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["L297395L2V.mx.vitamate.app"],
+        "components": [
+          { "/": "/hoy*" },
+          { "/": "/nutricion*" },
+          { "/": "/plan-semanal*" },
+          { "/": "/entrenar*" },
+          { "/": "/coach*" },
+          { "/": "/progreso*" },
+          { "/": "/cuenta*" },
+          { "/": "/recordatorios*" },
+          { "/": "/auth/*" }
+        ]
+      }
+    ]
+  }
+}

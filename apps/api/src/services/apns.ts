@@ -36,8 +36,16 @@ export async function sendApplePush(input: {
   const origin = input.environment === 'sandbox' ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
   const client = connect(origin);
   return new Promise((resolve, reject) => {
-    const close = () => client.close();
-    client.once('error', (error) => { close(); reject(error); });
+    let settled = false;
+    const close = () => { if (!client.closed && !client.destroyed) client.close(); };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      close();
+      reject(error);
+    };
+    client.setTimeout(12_000, () => fail(new Error('APNs agotó el tiempo de espera.')));
+    client.once('error', fail);
     const request = client.request({
       ':method': 'POST',
       ':path': `/3/device/${input.token}`,
@@ -53,6 +61,8 @@ export async function sendApplePush(input: {
     request.on('response', (headers) => { status = Number(headers[':status'] ?? 0); });
     request.on('data', (chunk) => { responseBody += chunk; });
     request.on('end', () => {
+      if (settled) return;
+      settled = true;
       close();
       let parsed: { reason?: string } = {};
       if (responseBody) {
@@ -61,7 +71,7 @@ export async function sendApplePush(input: {
       }
       resolve({ status, reason: parsed.reason });
     });
-    request.on('error', (error) => { close(); reject(error); });
+    request.on('error', fail);
     request.end(JSON.stringify({ aps: { alert: { title: input.title, body: input.body }, sound: 'default', 'thread-id': 'vitamate.coach' }, path: input.path ?? '/hoy' }));
   });
 }

@@ -15,8 +15,8 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 export async function pickNativePhoto(source: NativePhotoSource): Promise<string | null> {
   if (!Capacitor.isNativePlatform()) return null;
   const media = source === 'camera'
-    ? await Camera.takePhoto({ quality: 82, targetWidth: 1800, targetHeight: 1800, correctOrientation: true })
-    : (await Camera.chooseFromGallery({ quality: 82, targetWidth: 1800, targetHeight: 1800, correctOrientation: true, limit: 1 })).results[0];
+    ? await Camera.takePhoto({ quality: 80, targetWidth: 1280, targetHeight: 1280, correctOrientation: true })
+    : (await Camera.chooseFromGallery({ quality: 80, targetWidth: 1280, targetHeight: 1280, correctOrientation: true, limit: 1 })).results[0];
   if (!media?.webPath) return null;
   const response = await fetch(media.webPath);
   if (!response.ok) throw new Error('No pudimos abrir la fotografía seleccionada.');

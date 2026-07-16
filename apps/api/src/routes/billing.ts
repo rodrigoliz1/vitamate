@@ -149,10 +149,16 @@ export async function billingRoutes(app: FastifyInstance) {
     const configured = Boolean(stripe && config.STRIPE_PRICE_MONTHLY && config.STRIPE_PRICE_ANNUAL);
     let entitlement = await getEntitlement(userId);
     // El webhook es la fuente principal para renovaciones, pero una vuelta de
-    // Checkout o una entrega retrasada no debe dejar a una compra válida sin
-    // acceso. Reconciliamos sólo estados no Premium con Stripe y guardamos el
-    // resultado antes de responder.
-    if (configured && entitlement.source !== 'apple' && !(entitlement.plan === 'premium' && ['trialing', 'active'].includes(entitlement.status))) {
+    // Checkout, una entrega retrasada o un registro anterior a la columna
+    // source no deben dejar el acceso o el proveedor desactualizados.
+    const periodActive = !entitlement.currentPeriodEnd || Date.parse(entitlement.currentPeriodEnd) > Date.now();
+    const premiumActive = entitlement.plan === 'premium' && ['trialing', 'active'].includes(entitlement.status) && periodActive;
+    // Entitlements created before the App Store migration have source=none.
+    // Re-project them from Stripe even when access is already active so iOS
+    // knows where the plan must be managed and never sends a web purchase to
+    // the App Store screen by mistake.
+    const needsStripeProjection = entitlement.source !== 'apple' && (!premiumActive || entitlement.source !== 'stripe');
+    if (configured && needsStripeProjection) {
       try {
         const customer = await customerIdForUser(userId);
         if (customer) {

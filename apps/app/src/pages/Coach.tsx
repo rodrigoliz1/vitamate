@@ -1,5 +1,5 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
-import { IonActionSheet, IonButton, IonContent, IonIcon, IonModal, IonPage, IonSpinner, useIonViewDidEnter } from '@ionic/react';
+import { IonActionSheet, IonButton, IonContent, IonFooter, IonIcon, IonModal, IonPage, IonSpinner, useIonViewDidEnter } from '@ionic/react';
 import { useLocation } from 'react-router-dom';
 import { callOutline, cameraOutline, chatbubbleEllipsesOutline, checkmarkCircleOutline, closeOutline, documentAttachOutline, folderOpenOutline, imagesOutline, micOutline, micOffOutline, paperPlaneOutline, shieldCheckmarkOutline, sparklesOutline } from 'ionicons/icons';
 import { buildWeeklyNutritionBalance, buildWeeklyWorkoutBalance, summarizeNutritionDay, weeklyMealPlanForDate, type CoachChatMessage, type CoachMemoryUpdate, type HealthDocumentSummary, type MealEntry, type MealPlanOption, type MealType, type WorkoutSession } from '@vitamate/domain';
@@ -9,6 +9,7 @@ import type { VitamateSnapshot } from '../data/localRepository';
 import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, recordCoachCall, sendCoachMessage, type CoachChatContext, type PhotoAnalysis } from '../services/api';
 import { pickNativePhoto, type NativePhotoSource } from '../services/nativeCamera';
 import { isNativeIos } from '../services/nativePlatform';
+import { prepareFoodPhoto } from '../services/imageCompression';
 
 interface CoachProps {
   snapshot: VitamateSnapshot;
@@ -76,7 +77,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     ? ['Plan my day', 'How can I reach my protein goal?', 'Be honest about my progress']
     : ['Planea mi día', '¿Cómo alcanzo mi proteína?', 'Sé honesto con mi progreso'];
 
-  const context = (): CoachChatContext => {
+  const context = (message = ''): CoachChatContext => {
     const todayNutrition = summarizeNutritionDay(snapshot.meals);
     const weeklyNutrition = buildWeeklyNutritionBalance(snapshot.meals, snapshot.nutritionTarget);
     const weeklyWorkout = buildWeeklyWorkoutBalance(profile, snapshot.workoutSessions);
@@ -89,6 +90,10 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       : planAction === 'replace_ingredient'
         ? { type: 'replace_ingredient' as const, ingredient: parameters.get('ingredient') ?? undefined }
         : undefined;
+    const normalizedMessage = message.toLocaleLowerCase('es-MX');
+    const needsPlan = Boolean(planChangeTarget) || /(cambia|reemplaza|sustituye|intercambia).*(plan|menú|menu|comida|ingrediente)/.test(normalizedMessage);
+    const needsHealthDocuments = /laboratorio|análisis|analisis|estudio|documento|pdf|resultado|glucosa|colesterol/.test(normalizedMessage);
+    const needsWorkoutCatalog = !message || /entren|ejercicio|rutina|serie|repetición|repeticion|gym|fuerza|cardio/.test(normalizedMessage);
     return {
       locale: uiLocale,
       currentDateTime: new Date().toISOString(),
@@ -108,14 +113,14 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
         carbohydratesG: snapshot.nutritionTarget.carbohydratesG, fatG: snapshot.nutritionTarget.fatG,
       } : undefined,
       recentWorkouts: snapshot.workoutSessions.slice(0, 5).map((session) => ({ workoutTitle: session.workoutTitle, durationMinutes: session.durationMinutes, perceivedEffort: session.perceivedEffort, completedAt: session.completedAt })),
-      availableWorkouts: (snapshot.workoutPlan?.days ?? []).map((day) => ({ title: day.title, focus: day.focus, durationMinutes: day.durationMinutes, exercises: day.exercises.map((exercise) => `${exercise.name}: ${exercise.sets} × ${exercise.repRange}`) })),
+      availableWorkouts: needsWorkoutCatalog ? (snapshot.workoutPlan?.days ?? []).slice(0, 4).map((day) => ({ title: day.title, focus: day.focus, durationMinutes: day.durationMinutes, exercises: day.exercises.slice(0, 8).map((exercise) => `${exercise.name}: ${exercise.sets} × ${exercise.repRange}`) })) : [],
       todayNutrition,
       weeklyNutrition: weeklyNutrition ? { consumed: weeklyNutrition.consumed, target: weeklyNutrition.target, balance: weeklyNutrition.balance } : undefined,
       weeklyWorkout,
       weightTrend: latestWeight ? { latestKg: latestWeight.weightKg, previousKg: snapshot.weightEntries[1]?.weightKg ?? null } : undefined,
-      healthDocuments: snapshot.healthDocuments.slice(0, 10).map(({ filename, uploadedAt, summary }) => ({ filename, uploadedAt, summary })),
+      healthDocuments: needsHealthDocuments ? snapshot.healthDocuments.slice(0, 3).map(({ filename, uploadedAt, summary }) => ({ filename, uploadedAt, summary: summary.slice(0, 1200) })) : [],
       healthSummary,
-      mealPlanContext: currentMealPlan ? JSON.stringify(currentMealPlan) : undefined,
+      mealPlanContext: needsPlan && currentMealPlan ? JSON.stringify(currentMealPlan) : undefined,
       planChangeTarget,
     };
   };
@@ -163,7 +168,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     const history = options?.history ?? snapshot.coachMessages;
     if (appendUser) onAppendMessages([userMessage]);
     try {
-      const reply = await sendCoachMessage(context(), history, content.trim(), options?.attachment, appendUser ? userMessage : undefined, snapshot.coachMemories);
+      const reply = await sendCoachMessage(context(content.trim()), history, content.trim(), options?.attachment, appendUser ? userMessage : undefined, snapshot.coachMemories);
       if (reply.action?.type === 'log_meal') {
         const id = onAddMeal({ ...reply.action.meal, source: 'manual' });
         setLastAction({ kind: 'meal', id, label: reply.action.meal.name });
@@ -204,7 +209,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       const name = analysis.items.map((item) => item.name).join(', ');
       setPendingMeal({ preview, analysis, name, mealType });
       const prompt = `El usuario acaba de enviar una foto de su alimento. La estimación visual (aún no confirmada) es: ${JSON.stringify({ name, mealType, totals: analysis.totals, confidence: analysis.overallConfidence, notes: analysis.notes })}. Dale retroalimentación breve y útil sobre cómo encaja con sus metas de hoy. Menciona que debe confirmar el registro y evita presentar la estimación como exacta.`;
-      const reply = await sendCoachMessage(context(), snapshot.coachMessages, prompt, undefined, photoMessage, snapshot.coachMemories);
+      const reply = await sendCoachMessage(context(prompt), snapshot.coachMessages, prompt, undefined, photoMessage, snapshot.coachMemories);
       onAppendMessages([reply.assistantMessage ?? { id: createId(), role: 'assistant', content: reply.response, createdAt: new Date().toISOString() }]);
       onApplyMemoryUpdates(reply.memoryUpdates ?? []);
     } catch (unknownError) {
@@ -217,7 +222,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     event.target.value = '';
     if (!file) return;
     if (file.size > 5_500_000) return setError('La imagen debe pesar menos de 5.5 MB.');
-    const preview = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('No pudimos leer la foto.')); reader.readAsDataURL(file); });
+    const preview = await prepareFoodPhoto(file);
     await processPhoto(preview);
   };
 
@@ -248,11 +253,11 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     if (reply) onAddHealthDocument({ filename: file.name, mimeType: file.type, summary: reply });
   };
 
-  const composer = <footer className="coach-footer"><div className="suggestion-grid">{suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={busy} onClick={() => void submit(undefined, suggestion)}>{suggestion}</button>)}</div>
+  const composer = <div className="coach-footer"><div className="suggestion-grid">{suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={busy} onClick={() => void submit(undefined, suggestion)}>{suggestion}</button>)}</div>
     {error && <p className="form-error" role="alert">{error}</p>}
-    <form className="coach-composer" onSubmit={(event) => void submit(event)}><button type="button" className="coach-tool-button" disabled={busy} aria-label="Añadir foto" onClick={() => setPhotoPickerOpen(true)}><IonIcon icon={cameraOutline} /></button><input ref={photoCameraRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void handlePhoto(event)} /><input ref={photoAlbumRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handlePhoto(event)} /><input ref={photoFileRef} className="sr-only" type="file" accept="image/*" onChange={(event) => void handlePhoto(event)} /><button type="button" className="coach-tool-button coach-document-button" disabled={busy} aria-label="Adjuntar estudios en PDF" onClick={() => documentRef.current?.click()}><IonIcon icon={documentAttachOutline} /></button><input ref={documentRef} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void handleHealthDocument(event)} /><label htmlFor="coach-message" className="sr-only">{english ? 'Message VITACOACH' : 'Mensaje para VITACOACH'}</label><textarea id="coach-message" rows={2} maxLength={1500} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={english ? 'Message VITACOACH…' : 'Escríbele a VITACOACH…'} disabled={busy} onFocus={() => window.requestAnimationFrame(() => conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'auto' }))} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} /><button type="button" className="coach-tool-button" disabled={busy} aria-label="Hablar por voz" onClick={(event) => { event.currentTarget.blur(); setVoiceOpen(true); }}><IonIcon icon={micOutline} /></button><button type="submit" disabled={busy || !draft.trim()} aria-label={english ? 'Send message' : 'Enviar mensaje'}><IonIcon icon={paperPlaneOutline} /></button></form></footer>;
+    <form className="coach-composer" onSubmit={(event) => void submit(event)}><button type="button" className="coach-tool-button" disabled={busy} aria-label="Añadir foto" onClick={() => setPhotoPickerOpen(true)}><IonIcon icon={cameraOutline} /></button><input ref={photoCameraRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void handlePhoto(event)} /><input ref={photoAlbumRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handlePhoto(event)} /><input ref={photoFileRef} className="sr-only" type="file" accept="image/*" onChange={(event) => void handlePhoto(event)} /><button type="button" className="coach-tool-button coach-document-button" disabled={busy} aria-label="Adjuntar estudios en PDF" onClick={() => documentRef.current?.click()}><IonIcon icon={documentAttachOutline} /></button><input ref={documentRef} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void handleHealthDocument(event)} /><label htmlFor="coach-message" className="sr-only">{english ? 'Message VITACOACH' : 'Mensaje para VITACOACH'}</label><textarea id="coach-message" rows={2} maxLength={1500} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={english ? 'Message VITACOACH…' : 'Escríbele a VITACOACH…'} disabled={busy} onFocus={() => window.requestAnimationFrame(() => conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'auto' }))} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} /><button type="button" className="coach-tool-button" disabled={busy} aria-label="Hablar por voz" onClick={(event) => { event.currentTarget.blur(); setVoiceOpen(true); }}><IonIcon icon={micOutline} /></button><button type="submit" disabled={busy || !draft.trim()} aria-label={english ? 'Send message' : 'Enviar mensaje'}><IonIcon icon={paperPlaneOutline} /></button></form></div>;
 
-  return <IonPage className={`app-page${isNativeIos ? ' native-coach-page' : ''}`}><IonContent fullscreen scrollY={!isNativeIos}><main className="page-shell coach-shell vitacoach-shell">
+  return <IonPage className={`app-page coach-page${isNativeIos ? ' native-coach-page' : ''}`}><IonContent scrollY={false}><main className="page-shell coach-shell vitacoach-shell">
     <header className="app-header"><BrandMark compact /><button className="voice-call-button" onClick={(event) => { event.currentTarget.blur(); setVoiceOpen(true); }}><IonIcon icon={callOutline} /><span>{english ? 'Call' : 'Llamar'}</span></button></header>
     <section className="coach-heading"><span><IonIcon icon={sparklesOutline} /></span><div><p className="eyebrow coach-memory-status"><span>VITACOACH</span><span title="Puedes pedirme que recuerde, corrija u olvide algo"><IonIcon icon={shieldCheckmarkOutline} /> Memoria activa</span></p><h1>{english ? `I'm with you, ${profile.preferredName}` : `Estoy contigo, ${profile.preferredName}`}</h1><p>{english ? 'Chat freely, send a meal photo, or start a voice conversation.' : 'Habla libremente, envía una foto de tu comida o inicia una conversación por voz.'}</p></div></section>
     <section ref={conversationRef} className="coach-conversation" aria-live="polite">
@@ -263,8 +268,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       {lastAction && <article className="coach-action-confirmed"><IonIcon icon={checkmarkCircleOutline} /><div><strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : 'Plan alimenticio actualizado'}</strong><span>{lastAction.label}</span></div>{lastAction.kind !== 'plan' && lastAction.id && <button onClick={() => { if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!); else onDeleteWorkout(lastAction.id!); setLastAction(null); }}>Deshacer</button>}</article>}
       <div ref={endRef} />
     </section>
-    {composer}
-  </main></IonContent><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={context} onClose={() => setVoiceOpen(false)} onAsk={(text) => ask(text)} onEnded={async (event) => {
+  </main></IonContent><IonFooter className="coach-input-footer">{composer}</IonFooter><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={context} onClose={() => setVoiceOpen(false)} onAsk={(text) => ask(text)} onEnded={async (event) => {
     try {
       onAppendMessages([await recordCoachCall({ locale: uiLocale, ...event })]);
     } catch {

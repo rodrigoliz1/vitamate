@@ -21,7 +21,6 @@ NODE_ENV=production
 TRUST_PROXY=true
 APP_ORIGIN=https://app.vitamate.mx
 PUBLIC_APP_URL=https://app.vitamate.mx
-REQUIRE_COACH_AUTH=true
 
 SUPABASE_URL=https://TU_PROYECTO.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=SECRETO_ROTADO

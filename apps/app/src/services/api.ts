@@ -8,10 +8,10 @@ const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefin
 
 function apiBaseUrl(): string {
   if (typeof window === 'undefined') return configuredBaseUrl.replace(/\/v1$/, '');
-  // When Vite is exposed through an HTTPS tunnel for an iPhone test, route
-  // API calls through Vite. That preserves the secure origin required by
-  // getUserMedia while keeping the API private on the developer machine.
-  if (import.meta.env.DEV && window.location.protocol === 'https:') return '';
+  // Development always uses Vite's same-origin /v1 proxy. Besides keeping
+  // localhost free of production CORS configuration, this also works for LAN
+  // iPhone tests and HTTPS tunnels without exposing the local API directly.
+  if (import.meta.env.DEV) return '';
   try {
     const configured = new URL(configuredBaseUrl);
     const configuredIsLoopback = ['localhost', '127.0.0.1'].includes(configured.hostname);
@@ -27,12 +27,23 @@ function apiBaseUrl(): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const fetchWithToken = async (accessToken?: string) => fetch(`${apiBaseUrl()}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...(init?.headers ?? {}) },
+  });
   const session = supabase ? (await supabase.auth.getSession()).data.session : null;
   let response: Response;
   try {
-    response = await fetch(`${apiBaseUrl()}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}), ...(init?.headers ?? {}) } });
+    response = await fetchWithToken(session?.access_token);
+    // A suspended iOS WebView can resume with the cached session just before
+    // Supabase rotates its access token. Refresh once and transparently retry
+    // the authenticated request instead of treating the account as Free.
+    if (response.status === 401 && session && supabase) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.data.session?.access_token) response = await fetchWithToken(refreshed.data.session.access_token);
+    }
   } catch {
-    throw new Error('No pudimos conectar con VITAMATE. Verifica que la API esté activa y que este dispositivo esté en la misma red.');
+    throw new Error('No pudimos conectar con VITAMATE. Verifica tu conexión e inténtalo nuevamente.');
   }
   const data = await response.json().catch(() => ({})) as { message?: string };
   if (!response.ok) throw new Error(data.message ?? `Error ${response.status}`);
@@ -107,7 +118,7 @@ export async function findFoodByBarcode(barcode: string): Promise<FoodCatalogIte
 }
 
 export interface PhotoAnalysis {
-  items: Array<{ name: string; estimatedPortionG: number; calories: number; proteinG: number; carbohydratesG: number; fatG: number; confidence: number }>;
+  items: Array<{ name: string; brand: string | null; barcode: string | null; estimatedPortionG: number; calories: number; proteinG: number; carbohydratesG: number; fatG: number; confidence: number; dataSource: 'vision' | 'vitamate' | 'usda' | 'open_food_facts'; databaseMatchName: string | null; databaseMatchConfidence: number | null }>;
   totals: { calories: number; proteinG: number; carbohydratesG: number; fatG: number };
   overallConfidence: number;
   notes: string[];
@@ -175,7 +186,7 @@ export async function sendCoachMessage(context: CoachChatContext, history: Coach
       history: history.slice(-10).map(({ role, content }) => ({ role, content })),
       message,
       clientMessage: clientMessage ? { id: clientMessage.id, content: clientMessage.content, createdAt: clientMessage.createdAt } : undefined,
-      memory: memory.slice(0, 40).map(({ key, category, content, importance, confidence, expiresAt, updatedAt }) => ({ key, category, content, importance, confidence, expiresAt, updatedAt })),
+      memory: memory.slice(0, 12).map(({ key, category, content, importance, confidence, expiresAt, updatedAt }) => ({ key, category, content, importance, confidence, expiresAt, updatedAt })),
       imageDataUrl: typeof attachment === 'string' ? attachment : undefined,
       document: typeof attachment === 'object' ? attachment : undefined,
     }),

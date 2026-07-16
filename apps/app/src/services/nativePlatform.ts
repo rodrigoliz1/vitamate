@@ -9,14 +9,28 @@ import { initializeReminderNotifications } from './reminders';
 
 export const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
 
+function clearNativeViewportState(): void {
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement) activeElement.blur();
+  document.documentElement.classList.remove('native-keyboard-open');
+  document.documentElement.style.removeProperty('--native-keyboard-height');
+  window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+}
+
+export function dismissNativeKeyboard(): void {
+  clearNativeViewportState();
+  if (Capacitor.isNativePlatform()) void Keyboard.hide().catch(() => undefined);
+}
+
 async function handleDeepLink(urlString: string): Promise<void> {
   let url: URL;
   try { url = new URL(urlString); } catch { return; }
   const code = url.searchParams.get('code');
   if (code && supabase) await supabase.auth.exchangeCodeForSession(code).catch(() => undefined);
-  const path = url.protocol === 'mx.vitamate:'
+  const rawPath = url.protocol === 'mx.vitamate:'
     ? (url.host === 'auth' ? '/hoy' : `/${url.host}${url.pathname}`)
     : url.pathname;
+  const path = rawPath.length > 1 ? rawPath.replace(/\/+$/, '') : rawPath;
   const allowed = new Set(['/hoy', '/nutricion', '/plan-semanal', '/entrenar', '/coach', '/progreso', '/cuenta', '/recordatorios']);
   const destination = allowed.has(path) ? path : '/hoy';
   window.history.replaceState({}, '', `${destination}${url.searchParams.has('checkout') ? url.search : ''}`);
@@ -50,7 +64,11 @@ export async function initializeNativePlatform(): Promise<void> {
   });
   await CapacitorApp.addListener('appUrlOpen', ({ url }) => { void handleDeepLink(url); });
   await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-    if (isActive) window.dispatchEvent(new CustomEvent('vitamate:native-resume'));
+    if (isActive) {
+      clearNativeViewportState();
+      void Keyboard.hide().catch(() => undefined);
+      window.dispatchEvent(new CustomEvent('vitamate:native-resume'));
+    }
   });
   window.addEventListener('load', () => { void SplashScreen.hide(); }, { once: true });
   window.setTimeout(() => { void SplashScreen.hide(); }, 1600);

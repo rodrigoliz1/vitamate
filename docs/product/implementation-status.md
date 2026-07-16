@@ -21,7 +21,7 @@
 - Plan alimenticio diario matemáticamente distribuido entre 2–6 comidas, con dos alternativas por momento, macros, ingredientes, receta, tiempo y complejidad ajustados al perfil.
 - Catálogo inicial de 12 fotografías de platillos generado una sola vez con fal.ai y persistido en Supabase Storage para uso global.
 - Cuenta accesible desde el nombre del saludo, con datos del perfil, estado de respaldo y espacio de suscripción; Progreso permite volver a tomar el quiz y recalcular planes en cualquier momento.
-- Autenticación del endpoint de VITACOACH preparada: valida bearer tokens de Supabase y puede hacerse obligatoria con `REQUIRE_COACH_AUTH=true`.
+- Los endpoints de VITACOACH validan siempre el bearer token de Supabase y el entitlement Premium correspondiente.
 - Acciones estructuradas de VITACOACH: una comida o actividad física relatada como ya realizada se registra en el historial, se muestra una confirmación dentro del chat y puede deshacerse.
 - Navegación del chat corregida para abrir en el último mensaje y llamada manos libres continua después de una sola activación, con selección preferente de voz natural disponible en el dispositivo.
 - Elección exclusiva del plan diario: al registrar una opción se descarta visualmente la alternativa, se marca como comida realizada y puede anularse.

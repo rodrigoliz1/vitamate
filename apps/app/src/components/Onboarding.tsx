@@ -149,8 +149,8 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
             {step === 0 && <section>
               <p className="eyebrow">Primero, tú</p><h1>Construyamos un plan que sí encaje contigo.</h1>
               <p className="lead">Usaremos tus respuestas para personalizar nutrición, entrenamiento y el estilo de acompañamiento.</p>
-              <label className="field"><span>Nombre completo</span><input autoFocus autoComplete="name" value={draft.fullName} onChange={(e) => setDraft({ ...draft, fullName: e.target.value })} placeholder="Nombre y apellidos" /></label>
-              <label className="field"><span>¿Cómo quieres que te llamemos?</span><input autoFocus value={draft.preferredName} onChange={(e) => setDraft({ ...draft, preferredName: e.target.value })} placeholder="Tu nombre" /></label>
+              <label className="field"><span>Nombre completo</span><input autoComplete="name" value={draft.fullName} onChange={(e) => setDraft({ ...draft, fullName: e.target.value })} placeholder="Nombre y apellidos" /></label>
+              <label className="field"><span>¿Cómo quieres que te llamemos?</span><input autoComplete="given-name" value={draft.preferredName} onChange={(e) => setDraft({ ...draft, preferredName: e.target.value })} placeholder="Tu nombre" /></label>
               <label className="field"><span>Fecha de nacimiento</span><input type="date" value={draft.dateOfBirth} onChange={(e) => setDraft({ ...draft, dateOfBirth: e.target.value })} /></label>
               <p className="privacy-note"><IonIcon icon={shieldCheckmark} /> VITAMATE está diseñado inicialmente para personas de 18 años o más.</p>
             </section>}

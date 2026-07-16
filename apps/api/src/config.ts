@@ -15,14 +15,17 @@ const optionalPositiveInteger = z.preprocess(
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   TRUST_PROXY: z.enum(['true', 'false']).default(process.env.NODE_ENV === 'production' ? 'true' : 'false').transform((value) => value === 'true'),
-  APP_ORIGIN: z.string().default('http://127.0.0.1:4173,http://127.0.0.1:4174'),
-  PUBLIC_APP_URL: z.string().url().default('http://127.0.0.1:4174'),
+  APP_ORIGIN: z.string().default('http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:5173,http://localhost:5173'),
+  NATIVE_APP_ORIGIN: z.string().default('capacitor://app.vitamate.mx'),
+  PUBLIC_APP_URL: z.string().url().default('http://127.0.0.1:5173'),
   OPEN_FOOD_FACTS_BASE_URL: z.string().url().default('https://world.openfoodfacts.org'),
   OPEN_FOOD_FACTS_USER_AGENT: z.string().min(12).default('VITAMATE/1.0 (https://vitamate.mx; contacto@vitamate.mx)'),
   USDA_FDC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_VISION_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_COACH_MODEL: z.string().default('gpt-4o-mini'),
+  OPENAI_COACH_COMPLEX_MODEL: z.string().default('gpt-4o-mini'),
+  OPENAI_SUMMARY_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime-2.1'),
   OPENAI_REALTIME_VOICE: z.string().default('marin'),
   FAL_KEY: z.string().optional(),
@@ -57,13 +60,28 @@ const schema = z.object({
   INEGI_INPC_CALCULATOR_URL: z.string().url().optional(),
   INEGI_INPC_CONFIG_URL: z.string().url().optional(),
   INEGI_INPC_DATA_BASE_URL: z.string().url().optional(),
-  REQUIRE_COACH_AUTH: z.enum(['true', 'false']).default(process.env.NODE_ENV === 'production' ? 'true' : 'false').transform((value) => value === 'true'),
 });
 
 export const config = schema.parse(process.env);
 
+export function isNativeAppOrigin(origin: string): boolean {
+  return origin === config.NATIVE_APP_ORIGIN;
+}
+
 // Sólo se usa durante desarrollo local. Producción conserva una lista exacta
 // en APP_ORIGIN y nunca acepta una red privada de manera implícita.
 export function isLocalDevelopmentOrigin(origin: string): boolean {
-  return /^http:\/\/(?:127\.0\.0\.1|localhost|192\.168\.0\.9):\d{2,5}$/.test(origin);
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname.toLocaleLowerCase('en-US');
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname === '::1'
+      || /^10(?:\.\d{1,3}){3}$/.test(hostname)
+      || /^192\.168(?:\.\d{1,3}){2}$/.test(hostname)
+      || /^172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}$/.test(hostname);
+  } catch {
+    return false;
+  }
 }

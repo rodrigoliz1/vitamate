@@ -84,7 +84,6 @@ Agregar en **Render → Environment**. Las variables marcadas como secretas nunc
 | `BREVO_SMTP_KEY` | SMTP key rotada | secreto |
 | `BREVO_SENDER_EMAIL` | `noreply@vitamate.mx` | texto |
 | `BREVO_SENDER_NAME` | `VITAMATE` | texto |
-| `REQUIRE_COACH_AUTH` | `true` | texto |
 | `APPLE_BUNDLE_ID` | `mx.vitamate.app` | texto |
 | `APPLE_APP_ID` | ID numérico de App Store Connect; puede omitirse hasta crear la app | texto opcional |
 | `APPLE_PRODUCT_MONTHLY` | `mx.vitamate.premium.monthly` | texto |

@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IonButton, IonContent, IonIcon, IonPage } from '@ionic/react';
 import { arrowForward, barbellOutline, chatbubbleEllipsesOutline, checkmarkCircle, nutritionOutline, sparkles } from 'ionicons/icons';
 import type { UserProfile } from '@vitamate/domain';
 import type { OtpVerificationType } from '../services/api';
-import { isNativeIos } from '../services/nativePlatform';
+import { dismissNativeKeyboard, isNativeIos } from '../services/nativePlatform';
 import { AuthGate } from './AuthGate';
 import { BrandMark } from './BrandMark';
 import { Onboarding } from './Onboarding';
@@ -25,25 +25,35 @@ interface SignupJourneyProps {
   onVerify(email: string, otp: string, type: OtpVerificationType): Promise<void>;
 }
 
-const IOS_WELCOME_KEY = 'vitamate.ios-welcome-seen.v1';
-
 function shouldShowNativeWelcome(): boolean {
   return isNativeIos || (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview-ios-welcome'));
 }
 
 export function SignupJourney(props: SignupJourneyProps) {
-  const [loginReturn, setLoginReturn] = useState<Extract<Stage, 'intro' | 'auth'>>('auth');
+  const nativeWelcomeEnabled = shouldShowNativeWelcome();
+  const [loginReturn, setLoginReturn] = useState<Extract<Stage, 'intro' | 'auth' | 'quiz'>>('auth');
   const [stage, setStage] = useState<Stage>(() => {
     if (props.pendingProfile && props.pendingRegistrationEmail) return 'verify';
     if (props.pendingProfile) return 'register';
-    if (shouldShowNativeWelcome() && window.localStorage.getItem(IOS_WELCOME_KEY) !== 'true') return 'intro';
+    if (shouldShowNativeWelcome()) return 'intro';
     return 'auth';
   });
 
-  const leaveIntro = (next: Stage) => {
-    window.localStorage.setItem(IOS_WELCOME_KEY, 'true');
+  const navigate = (next: Stage) => {
+    dismissNativeKeyboard();
     setStage(next);
   };
+
+  useEffect(() => {
+    if (!isNativeIos || props.pendingProfile || props.pendingRegistrationEmail) return;
+    const showWelcomeAfterResume = () => setStage((current) => {
+      if (current !== 'auth' && current !== 'login') return current;
+      dismissNativeKeyboard();
+      return 'intro';
+    });
+    window.addEventListener('vitamate:native-resume', showWelcomeAfterResume);
+    return () => window.removeEventListener('vitamate:native-resume', showWelcomeAfterResume);
+  }, [props.pendingProfile, props.pendingRegistrationEmail]);
 
   const register = async (email: string, password: string) => {
     const response = await props.onRegister(email, password);
@@ -51,13 +61,13 @@ export function SignupJourney(props: SignupJourneyProps) {
     return response;
   };
 
-  if (stage === 'intro') return <NativeWelcome onCreate={() => leaveIntro('quiz')} onSignIn={() => { setLoginReturn('intro'); leaveIntro('login'); }} />;
+  if (stage === 'intro') return <NativeWelcome onCreate={() => navigate('quiz')} onSignIn={() => { setLoginReturn('intro'); navigate('login'); }} />;
 
   if (stage === 'quiz') return <Onboarding
     initialProfile={props.pendingProfile}
     initialStep={props.pendingProfile ? 7 : 0}
-    onExitToAuth={() => { setLoginReturn('auth'); setStage('login'); }}
-    onComplete={(profile) => { props.onPendingProfile(profile); setStage('register'); }}
+    onExitToAuth={() => { setLoginReturn(nativeWelcomeEnabled ? 'intro' : 'auth'); navigate('login'); }}
+    onComplete={(profile) => { props.onPendingProfile(profile); navigate('register'); }}
   />;
 
   return <AuthGate
@@ -66,8 +76,8 @@ export function SignupJourney(props: SignupJourneyProps) {
     message={props.message}
     initialView={stage === 'register' ? 'register' : stage === 'verify' ? 'verify' : stage === 'login' ? 'login' : 'welcome'}
     initialEmail={stage === 'verify' ? props.pendingRegistrationEmail ?? '' : ''}
-    onStartQuiz={() => setStage('quiz')}
-    onBack={stage === 'register' || stage === 'verify' ? () => setStage('quiz') : stage === 'login' ? () => setStage(loginReturn) : undefined}
+    onStartQuiz={() => navigate('quiz')}
+    onBack={stage === 'register' || stage === 'verify' ? () => navigate('quiz') : stage === 'login' ? () => navigate(loginReturn) : undefined}
     onRegister={register}
     onResendRegistration={props.onResendRegistration}
     onSignIn={props.onSignIn}

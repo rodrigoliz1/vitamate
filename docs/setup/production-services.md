@@ -76,7 +76,7 @@ OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_REALTIME_VOICE=marin
 ```
 
-Para probar: inicia API y PWA, abre **VITACOACH → Llamar** y concede micrófono. La llamada comienza automáticamente. Todos los endpoints de VITACOACH exigen una sesión válida y un entitlement Premium; `REQUIRE_COACH_AUTH=true` se conserva además como configuración explícita de producción.
+Para probar: inicia API y PWA, abre **VITACOACH → Llamar** y concede micrófono. La llamada comienza automáticamente. Todos los endpoints de VITACOACH exigen siempre una sesión válida y un entitlement Premium.
 
 ## 5. Despliegue de base de datos
 
@@ -94,7 +94,6 @@ En producción configura también:
 ```dotenv
 APP_ORIGIN=https://app.vitamate.mx
 TRUST_PROXY=true
-REQUIRE_COACH_AUTH=true
 ```
 
 ## 6. Verificación local de Stripe

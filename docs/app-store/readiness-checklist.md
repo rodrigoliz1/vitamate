@@ -38,7 +38,7 @@
 - [ ] Añadir `mx.vitamate://auth/callback` a Redirect URLs de Supabase.
 - [ ] Publicar `apple-app-site-association` con el Team ID real.
 - [ ] Rotar toda credencial expuesta anteriormente y usar sólo secretos del hosting.
-- [ ] Probar CORS y `REQUIRE_COACH_AUTH=true` en dominios reales.
+- [ ] Probar CORS y la autenticación obligatoria de VITACOACH en dominios reales.
 - [ ] Configurar logs, alertas, rate limiting persistente y respaldos.
 
 ## Calidad en dispositivo real

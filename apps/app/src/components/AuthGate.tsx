@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { IonButton, IonContent, IonIcon, IonPage, IonSpinner } from '@ionic/react';
 import { checkmarkCircle, eyeOffOutline, eyeOutline, lockClosedOutline, logInOutline, mailOutline, personAddOutline, shieldCheckmarkOutline } from 'ionicons/icons';
 import type { OtpVerificationType } from '../services/api';
+import { dismissNativeKeyboard } from '../services/nativePlatform';
 import { BrandMark } from './BrandMark';
 
 type View = 'welcome' | 'register' | 'verify' | 'login' | 'forgot' | 'recover';
@@ -68,6 +69,11 @@ export function AuthGate({
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
 
+  const transitionTo = (next: View) => {
+    dismissNativeKeyboard();
+    setView(next);
+  };
+
   useEffect(() => {
     if (resendSeconds <= 0) return;
     const timer = window.setTimeout(() => setResendSeconds((seconds) => Math.max(0, seconds - 1)), 1000);
@@ -88,7 +94,7 @@ export function AuthGate({
       setVerificationType(response.verificationType);
       window.localStorage.setItem(verificationTypeStorageKey(email), response.verificationType);
       startCooldown('signup');
-      setView('verify');
+      transitionTo('verify');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No fue posible crear tu cuenta.'); }
   };
 
@@ -108,7 +114,7 @@ export function AuthGate({
       await onRequestPasswordRecovery(email.trim());
       setOtp('');
       startCooldown('recovery');
-      setView('recover');
+      transitionTo('recover');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No fue posible solicitar el código.'); }
   };
 
@@ -139,10 +145,10 @@ export function AuthGate({
 
   const back = () => {
     resetSensitiveFields();
-    if (view === 'verify') return setView('register');
-    if (view === 'recover') return setView('forgot');
+    if (view === 'verify') return transitionTo('register');
+    if (view === 'recover') return transitionTo('forgot');
     if ((view === initialView || (view === 'register' && ['register', 'verify'].includes(initialView))) && onBack) return onBack();
-    setView('welcome');
+    transitionTo('welcome');
   };
 
   const title = view === 'welcome' ? 'Tu mejor versión empieza con unas respuestas.'
@@ -161,17 +167,17 @@ export function AuthGate({
   return <IonPage className="auth-page"><IonContent fullscreen><main className="auth-shell"><BrandMark /><section className="auth-card">
     <span className="auth-icon"><IonIcon icon={view === 'login' ? logInOutline : view === 'register' ? personAddOutline : view === 'verify' ? shieldCheckmarkOutline : mailOutline} /></span>
     <p className="eyebrow">Tu cuenta VITAMATE</p><h1>{title}</h1><p>{lead}</p>
-    {view === 'welcome' && <div className="auth-choice-grid"><IonButton className="primary-button" expand="block" onClick={() => { resetError(); onStartQuiz(); }}><IonIcon slot="start" icon={personAddOutline} />Crear mi cuenta</IonButton><IonButton fill="outline" expand="block" onClick={() => { resetError(); setView('login'); }}><IonIcon slot="start" icon={logInOutline} />Iniciar sesión</IonButton></div>}
+    {view === 'welcome' && <div className="auth-choice-grid"><IonButton className="primary-button" expand="block" onClick={() => { resetError(); onStartQuiz(); }}><IonIcon slot="start" icon={personAddOutline} />Crear mi cuenta</IonButton><IonButton fill="outline" expand="block" onClick={() => { resetError(); transitionTo('login'); }}><IonIcon slot="start" icon={logInOutline} />Iniciar sesión</IonButton></div>}
     {view === 'register' && <form onSubmit={submitRegister}>
-      <label className="field"><span>Correo electrónico</span><input autoFocus type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label>
+      <label className="field"><span>Correo electrónico</span><input type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label>
       <PasswordField label="Contraseña" value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="new-password" placeholder="Mínimo 10 caracteres" />
       <PasswordField label="Confirma tu contraseña" value={passwordConfirmation} onChange={setPasswordConfirmation} show={showPasswordConfirmation} onToggle={() => setShowPasswordConfirmation((value) => !value)} autoComplete="new-password" placeholder="Repite tu contraseña" />
       <IonButton type="submit" expand="block" className="primary-button" disabled={busy || !email.includes('@') || password.length < 10 || password !== passwordConfirmation}>{busy ? <IonSpinner /> : <>Crear y guardar mi plan<IonIcon slot="end" icon={checkmarkCircle} /></>}</IonButton>
     </form>}
-    {view === 'verify' && <form onSubmit={submitVerification}><label className="field otp-field"><span>Código de acceso</span><input autoFocus type="text" inputMode="numeric" autoComplete="one-time-code" required value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="Código" /></label><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !otp}>{busy ? <IonSpinner /> : <>Verificar y continuar<IonIcon slot="end" icon={checkmarkCircle} /></>}</IonButton><ResendButton seconds={resendSeconds} busy={busy} onClick={resendCode} /></form>}
-    {view === 'login' && <form onSubmit={submitLogin}><label className="field"><span>Correo electrónico</span><input autoFocus type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label><PasswordField label="Contraseña" value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="current-password" placeholder="Tu contraseña" /><button type="button" className="auth-forgot-password" onClick={() => { resetError(); setPassword(''); setView('forgot'); }}>Olvidé mi contraseña</button><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !email.includes('@') || !password}>{busy ? <IonSpinner /> : <>Entrar a VITAMATE<IonIcon slot="end" icon={logInOutline} /></>}</IonButton></form>}
-    {view === 'forgot' && <form onSubmit={submitRecoveryRequest}><label className="field"><span>Correo electrónico</span><input autoFocus type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !email.includes('@')}>{busy ? <IonSpinner /> : <>Enviarme un código<IonIcon slot="end" icon={mailOutline} /></>}</IonButton></form>}
-    {view === 'recover' && <form onSubmit={submitPasswordReset}><label className="field otp-field"><span>Código de recuperación</span><input autoFocus type="text" inputMode="numeric" autoComplete="one-time-code" required value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="Código" /></label><PasswordField label="Nueva contraseña" value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="new-password" placeholder="Mínimo 10 caracteres" /><PasswordField label="Confirma tu nueva contraseña" value={passwordConfirmation} onChange={setPasswordConfirmation} show={showPasswordConfirmation} onToggle={() => setShowPasswordConfirmation((value) => !value)} autoComplete="new-password" placeholder="Repite tu contraseña" /><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !otp || password.length < 10 || password !== passwordConfirmation}>{busy ? <IonSpinner /> : <>Guardar nueva contraseña<IonIcon slot="end" icon={checkmarkCircle} /></>}</IonButton><ResendButton seconds={resendSeconds} busy={busy} onClick={resendCode} /></form>}
+    {view === 'verify' && <form onSubmit={submitVerification}><label className="field otp-field"><span>Código de acceso</span><input type="text" inputMode="numeric" autoComplete="one-time-code" required value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="Código" /></label><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !otp}>{busy ? <IonSpinner /> : <>Verificar y continuar<IonIcon slot="end" icon={checkmarkCircle} /></>}</IonButton><ResendButton seconds={resendSeconds} busy={busy} onClick={resendCode} /></form>}
+    {view === 'login' && <form onSubmit={submitLogin}><label className="field"><span>Correo electrónico</span><input type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label><PasswordField label="Contraseña" value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="current-password" placeholder="Tu contraseña" /><button type="button" className="auth-forgot-password" onClick={() => { resetError(); setPassword(''); transitionTo('forgot'); }}>Olvidé mi contraseña</button><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !email.includes('@') || !password}>{busy ? <IonSpinner /> : <>Entrar a VITAMATE<IonIcon slot="end" icon={logInOutline} /></>}</IonButton></form>}
+    {view === 'forgot' && <form onSubmit={submitRecoveryRequest}><label className="field"><span>Correo electrónico</span><input type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" /></label><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !email.includes('@')}>{busy ? <IonSpinner /> : <>Enviarme un código<IonIcon slot="end" icon={mailOutline} /></>}</IonButton></form>}
+    {view === 'recover' && <form onSubmit={submitPasswordReset}><label className="field otp-field"><span>Código de recuperación</span><input type="text" inputMode="numeric" autoComplete="one-time-code" required value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="Código" /></label><PasswordField label="Nueva contraseña" value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="new-password" placeholder="Mínimo 10 caracteres" /><PasswordField label="Confirma tu nueva contraseña" value={passwordConfirmation} onChange={setPasswordConfirmation} show={showPasswordConfirmation} onToggle={() => setShowPasswordConfirmation((value) => !value)} autoComplete="new-password" placeholder="Repite tu contraseña" /><IonButton type="submit" expand="block" className="primary-button" disabled={busy || !otp || password.length < 10 || password !== passwordConfirmation}>{busy ? <IonSpinner /> : <>Guardar nueva contraseña<IonIcon slot="end" icon={checkmarkCircle} /></>}</IonButton><ResendButton seconds={resendSeconds} busy={busy} onClick={resendCode} /></form>}
     {(error || message) && <p className={error ? 'form-error' : 'auth-message'} role="status">{error || message}</p>}
     {view !== 'welcome' && <button type="button" className="text-button" onClick={back} disabled={busy}>{view === 'login' && initialView === 'welcome' ? 'Quiero crear una cuenta' : 'Volver'}</button>}
     <small><IonIcon icon={lockClosedOutline} /> Tu correo es único y personal. Al continuar aceptas el tratamiento de tus datos conforme al aviso de privacidad.</small>
