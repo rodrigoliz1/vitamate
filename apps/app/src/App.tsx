@@ -48,8 +48,10 @@ function initialPendingProfile(): UserProfile | null {
   if (typeof window === 'undefined') return null;
   try {
     const value = window.localStorage.getItem(pendingProfileStorageKey);
-    return value ? JSON.parse(value) as UserProfile : null;
-  } catch { return null; }
+    return value ? (JSON.parse(value) as UserProfile) : null;
+  } catch {
+    return null;
+  }
 }
 
 function initialPendingEmail(): string | null {
@@ -58,11 +60,21 @@ function initialPendingEmail(): string | null {
 }
 
 function AppBootScreen() {
-  return <IonApp><main className="app-boot-screen" aria-label="Preparando VITAMATE">
-    <div className="app-boot-halo"><BrandMark /></div>
-    <p>Preparando tu experiencia</p>
-    <span className="app-boot-dots" aria-hidden="true"><i /><i /><i /></span>
-  </main></IonApp>;
+  return (
+    <IonApp>
+      <main className="app-boot-screen" aria-label="Preparando VITAMATE">
+        <div className="app-boot-halo">
+          <BrandMark />
+        </div>
+        <p>Preparando tu experiencia</p>
+        <span className="app-boot-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      </main>
+    </IonApp>
+  );
 }
 
 const App: React.FC = () => {
@@ -74,6 +86,7 @@ const App: React.FC = () => {
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
   const [celebration, setCelebration] = useState<BillingEntitlement | null>(null);
   const handledCheckout = useRef<string | null>(null);
+  const handledVoiceCheckout = useRef<string | null>(null);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
@@ -141,38 +154,73 @@ const App: React.FC = () => {
       clearCheckoutUrl();
     };
     void confirm();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [actions.cloud.email, actions.completePlanSelection, actions.reconcileCheckout, actions.refreshBilling]);
+  useEffect(() => {
+    if (!actions.cloud.email) return;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('voice_topup');
+    const sessionId = params.get('session_id');
+    const key = `${status ?? ''}:${sessionId ?? ''}`;
+    if (!status || handledVoiceCheckout.current === key) return;
+    handledVoiceCheckout.current = key;
+    const clear = () => window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`);
+    if (status === 'cancelled' || !sessionId) {
+      clear();
+      return;
+    }
+    void actions
+      .reconcileVoiceCheckout(sessionId)
+      .then(clear)
+      .catch(() => undefined);
+  }, [actions.cloud.email, actions.reconcileVoiceCheckout]);
   if (!actions.cloud.sessionReady) return <AppBootScreen />;
-  if (!actions.cloud.email) return <IonApp><SignupJourney
-    busy={actions.cloud.busy}
-    message={actions.cloud.message}
-    pendingProfile={pendingProfile}
-    pendingRegistrationEmail={pendingRegistrationEmail}
-    onPendingProfile={(profile) => {
-      window.localStorage.setItem(pendingProfileStorageKey, JSON.stringify(profile));
-      window.localStorage.removeItem(pendingEmailStorageKey);
-      setPendingProfile(profile);
-      setPendingRegistrationEmail(null);
-    }}
-    onRegistrationEmail={(email) => {
-      window.localStorage.setItem(pendingEmailStorageKey, email);
-      setPendingRegistrationEmail(email);
-    }}
-    onRegister={actions.registerWithPassword}
-    onResendRegistration={actions.resendRegistrationCode}
-    onSignIn={actions.signInWithPassword}
-    onRequestPasswordRecovery={actions.requestPasswordRecovery}
-    onResetPassword={actions.resetPasswordWithOtp}
-    onVerify={actions.verifyOtp}
-  /></IonApp>;
+  if (!actions.cloud.email)
+    return (
+      <IonApp>
+        <SignupJourney
+          busy={actions.cloud.busy}
+          message={actions.cloud.message}
+          pendingProfile={pendingProfile}
+          pendingRegistrationEmail={pendingRegistrationEmail}
+          onPendingProfile={(profile) => {
+            window.localStorage.setItem(pendingProfileStorageKey, JSON.stringify(profile));
+            window.localStorage.removeItem(pendingEmailStorageKey);
+            setPendingProfile(profile);
+            setPendingRegistrationEmail(null);
+          }}
+          onRegistrationEmail={(email) => {
+            window.localStorage.setItem(pendingEmailStorageKey, email);
+            setPendingRegistrationEmail(email);
+          }}
+          onRegister={actions.registerWithPassword}
+          onResendRegistration={actions.resendRegistrationCode}
+          onSignIn={actions.signInWithPassword}
+          onRequestPasswordRecovery={actions.requestPasswordRecovery}
+          onResetPassword={actions.resetPasswordWithOtp}
+          onVerify={actions.verifyOtp}
+        />
+      </IonApp>
+    );
   if (!actions.cloud.snapshotReady) return <AppBootScreen />;
-  if (!snapshot.profile) return <IonApp><Onboarding onComplete={actions.completeOnboarding} /></IonApp>;
-  if (!snapshot.planSelectionCompleted) return <IonApp><PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onComplete={actions.completePlanSelection} /></IonApp>;
+  if (!snapshot.profile)
+    return (
+      <IonApp>
+        <Onboarding onComplete={actions.completeOnboarding} />
+      </IonApp>
+    );
+  if (!snapshot.planSelectionCompleted)
+    return (
+      <IonApp>
+        <PlanSelection entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onComplete={actions.completePlanSelection} />
+      </IonApp>
+    );
   const english = resolveUiLocale(snapshot.profile.locale) === 'en-US';
   const premium = actions.billing.isPremium;
   const requirePremium = () => setSubscriptionOpen(true);
-  const gated = (title: string, node: React.ReactNode) => premium ? node : <PremiumGate title={title} onUnlock={requirePremium} />;
+  const gated = (title: string, node: React.ReactNode) => (premium ? node : <PremiumGate title={title} onUnlock={requirePremium} />);
 
   return (
     <IonApp>
@@ -180,22 +228,48 @@ const App: React.FC = () => {
         <IonTabs>
           <IonRouterOutlet>
             <Route exact path="/hoy" render={() => <Hoy snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} />} />
-            <Route exact path="/nutricion" render={() => <Nutricion snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onSavePersonalFood={actions.savePersonalFood} onDeletePersonalFood={actions.deletePersonalFood} onSelectMealPlanOption={actions.selectMealPlanOption} />} />
+            <Route exact path="/nutricion" render={() => <Nutricion snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} onAddMeal={actions.addMeal} onUpdateMeal={actions.updateMeal} onDeleteMeal={actions.deleteMeal} onSavePersonalFood={actions.savePersonalFood} onDeletePersonalFood={actions.deletePersonalFood} onSelectMealPlanOption={actions.selectMealPlanOption} />} />
             <Route exact path="/plan-semanal" render={() => gated('Plan alimenticio y lista semanal del súper', <PlanSemanal snapshot={snapshot} onUpdateProfile={actions.updateProfile} onSelectMealPlanOption={actions.selectMealPlanOption} />)} />
-            <Route exact path="/entrenar" render={() => gated('Entrenamientos personalizados y progresivos', <Entrenar snapshot={snapshot} onCompleteWorkout={actions.completeGuidedWorkout} />)} />
-            <Route exact path="/coach" render={() => gated('VITACOACH por chat y llamada', <Coach snapshot={snapshot} healthSummary={actions.health.summary ?? undefined} onAppendMessages={actions.appendCoachMessages} onMergeMessages={actions.mergeCoachMessages} onApplyMemoryUpdates={actions.applyCoachMemoryUpdates} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onAddManualWorkout={actions.addManualWorkout} onDeleteWorkout={actions.deleteWorkoutSession} onAddSleep={actions.addSleep} onDeleteSleep={actions.deleteSleep} onAddHealthDocument={actions.addHealthDocument} onReplaceMealPlanOption={actions.replaceMealPlanOption} onReplaceMealPlanIngredient={actions.replaceMealPlanIngredient} />)} />
+            <Route exact path="/entrenar" render={() => gated('Entrenamientos personalizados y progresivos', <Entrenar snapshot={snapshot} onCompleteWorkout={actions.completeGuidedWorkout} onUpdateWorkout={actions.updateWorkoutSession} onDeleteWorkout={actions.deleteWorkoutSession} />)} />
+            <Route
+              exact
+              path="/coach"
+              render={() => gated('VITACOACH por chat y llamada', <Coach snapshot={snapshot} healthSummary={actions.health.summary ?? undefined} voiceBalance={actions.billing.voiceBalance} voiceOffers={actions.billing.voiceOffers} billingBusy={actions.billing.busy} billingMessage={actions.billing.message} onRefreshVoice={actions.billing.refresh} onPurchaseVoice={actions.billing.purchaseVoice} onVoiceBalance={actions.billing.setVoiceBalance} onAppendMessages={actions.appendCoachMessages} onMergeMessages={actions.mergeCoachMessages} onApplyMemoryUpdates={actions.applyCoachMemoryUpdates} onAddMeal={actions.addMeal} onDeleteMeal={actions.deleteMeal} onAddManualWorkout={actions.addManualWorkout} onDeleteWorkout={actions.deleteWorkoutSession} onAddSleep={actions.addSleep} onDeleteSleep={actions.deleteSleep} onAddHealthDocument={actions.addHealthDocument} onReplaceMealPlanOption={actions.replaceMealPlanOption} onReplaceMealPlanIngredient={actions.replaceMealPlanIngredient} />)}
+            />
             <Route exact path="/progreso" render={() => gated('Progreso, metas y personalización', <Progreso snapshot={snapshot} onAddWeight={actions.addWeight} onAddSleep={actions.addSleep} onDeleteSleep={actions.deleteSleep} onUpdateProfile={actions.updateProfile} theme={theme} onSetTheme={setTheme} health={actions.health} cloud={actions.cloud} onRequestMagicLink={actions.requestMagicLink} onSyncCloud={actions.syncCloud} onSignOutCloud={actions.signOutCloud} />)} />
-            <Route exact path="/cuenta" render={() => <Cuenta snapshot={snapshot} cloudEmail={actions.cloud.email} entitlement={actions.billing.entitlement} onOpenSubscription={requirePremium} onDeleteAccount={actions.deleteAccount} />} />
+            <Route exact path="/cuenta" render={() => <Cuenta snapshot={snapshot} cloudEmail={actions.cloud.email} entitlement={actions.billing.entitlement} voiceBalance={actions.billing.voiceBalance} voiceOffers={actions.billing.voiceOffers} billingBusy={actions.billing.busy} billingMessage={actions.billing.message} onPurchaseVoice={actions.billing.purchaseVoice} onOpenSubscription={requirePremium} onDeleteAccount={actions.deleteAccount} />} />
             <Route exact path="/recordatorios" render={() => <Recordatorios snapshot={snapshot} onSave={actions.saveReminder} onDelete={actions.deleteReminder} onComplete={actions.completeReminder} onEnableNotifications={actions.enableNotifications} />} />
-            <Route exact path="/"><Redirect to="/hoy" /></Route>
-            <Route><Redirect to="/hoy" /></Route>
+            <Route exact path="/">
+              <Redirect to="/hoy" />
+            </Route>
+            <Route>
+              <Redirect to="/hoy" />
+            </Route>
           </IonRouterOutlet>
           <IonTabBar slot="bottom" className="app-tab-bar">
-            <IonTabButton tab="hoy" href="/hoy"><IonIcon icon={home} /><IonLabel>{english ? 'Today' : 'Hoy'}</IonLabel></IonTabButton>
-            <IonTabButton tab="nutricion" href="/nutricion"><IonIcon icon={restaurant} /><IonLabel>{english ? 'Nutrition' : 'Nutrición'}</IonLabel></IonTabButton>
-            <IonTabButton tab="entrenar" href={premium ? '/entrenar' : undefined} onClick={premium ? undefined : requirePremium}><IonIcon icon={barbell} /><IonLabel>{english ? 'Train' : 'Entrenar'}</IonLabel>{!premium && <IonIcon className="tab-lock" icon={lockClosed} />}</IonTabButton>
-            <IonTabButton tab="coach" href={premium ? '/coach' : undefined} onClick={premium ? undefined : requirePremium} className="vitacoach-tab"><IonIcon icon={chatbubbles} /><IonLabel>VITACOACH</IonLabel>{!premium && <IonIcon className="tab-lock" icon={lockClosed} />}</IonTabButton>
-            <IonTabButton tab="progreso" href={premium ? '/progreso' : undefined} onClick={premium ? undefined : requirePremium}><IonIcon icon={trendingUp} /><IonLabel>{english ? 'Progress' : 'Progreso'}</IonLabel>{!premium && <IonIcon className="tab-lock" icon={lockClosed} />}</IonTabButton>
+            <IonTabButton tab="hoy" href="/hoy">
+              <IonIcon icon={home} />
+              <IonLabel>{english ? 'Today' : 'Hoy'}</IonLabel>
+            </IonTabButton>
+            <IonTabButton tab="nutricion" href="/nutricion">
+              <IonIcon icon={restaurant} />
+              <IonLabel>{english ? 'Nutrition' : 'Nutrición'}</IonLabel>
+            </IonTabButton>
+            <IonTabButton tab="entrenar" href={premium ? '/entrenar' : undefined} onClick={premium ? undefined : requirePremium}>
+              <IonIcon icon={barbell} />
+              <IonLabel>{english ? 'Train' : 'Entrenar'}</IonLabel>
+              {!premium && <IonIcon className="tab-lock" icon={lockClosed} />}
+            </IonTabButton>
+            <IonTabButton tab="coach" href={premium ? '/coach' : undefined} onClick={premium ? undefined : requirePremium} className="vitacoach-tab">
+              <IonIcon icon={chatbubbles} />
+              <IonLabel>VITACOACH</IonLabel>
+              {!premium && <IonIcon className="tab-lock" icon={lockClosed} />}
+            </IonTabButton>
+            <IonTabButton tab="progreso" href={premium ? '/progreso' : undefined} onClick={premium ? undefined : requirePremium}>
+              <IonIcon icon={trendingUp} />
+              <IonLabel>{english ? 'Progress' : 'Progreso'}</IonLabel>
+              {!premium && <IonIcon className="tab-lock" icon={lockClosed} />}
+            </IonTabButton>
           </IonTabBar>
         </IonTabs>
         <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onLeavingForCheckout={actions.completePlanSelection} />

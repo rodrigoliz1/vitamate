@@ -2,31 +2,28 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import Stripe from 'stripe';
 import { z } from 'zod';
 import { config, isLocalDevelopmentOrigin } from '../config.js';
-import {
-  claimWebhookEvent,
-  claimAppleWebhookEvent,
-  customerIdForUser,
-  getEntitlement,
-  isPremium,
-  releaseWebhookEvent,
-  releaseAppleWebhookEvent,
-  saveCustomer,
-  upsertSubscription,
-  upsertAppleSubscription,
-  userIdForCustomer,
-  userIdForAppleOriginalTransaction,
-  type BillingStatus,
-} from '../repositories/billingRepository.js';
+import { claimWebhookEvent, claimAppleWebhookEvent, customerIdForUser, getEntitlement, isPremium, releaseWebhookEvent, releaseAppleWebhookEvent, saveCustomer, upsertSubscription, upsertAppleSubscription, userIdForCustomer, userIdForAppleOriginalTransaction, type BillingStatus } from '../repositories/billingRepository.js';
 import { appleInterval, verifyAppleNotification, verifyAppleRenewalInfo, verifyAppleTransaction } from '../services/appleStore.js';
 import { requireUser } from '../services/auth.js';
 import { requireSupabase } from '../services/supabase.js';
+import { getVoiceCreditBalance, grantVoiceCredit, VOICE_CREDIT_PACKAGES, voicePackage, voicePackageForAppleProduct } from '../repositories/voiceCreditsRepository.js';
 
 const stripe = config.STRIPE_SECRET_KEY ? new Stripe(config.STRIPE_SECRET_KEY) : null;
-let offersCache: { expiresAt: number; offers: Array<{ interval: 'month' | 'year'; amount: number; currency: string }> } | null = null;
+let offersCache: {
+  expiresAt: number;
+  offers: Array<{
+    interval: 'month' | 'year';
+    amount: number;
+    currency: string;
+  }>;
+} | null = null;
 
 function requireStripe(): Stripe {
   if (!stripe || !config.STRIPE_PRICE_MONTHLY || !config.STRIPE_PRICE_ANNUAL) {
-    throw Object.assign(new Error('Los pagos todavía no están configurados.'), { statusCode: 503, code: 'BILLING_NOT_CONFIGURED' });
+    throw Object.assign(new Error('Los pagos todavía no están configurados.'), {
+      statusCode: 503,
+      code: 'BILLING_NOT_CONFIGURED',
+    });
   }
   return stripe;
 }
@@ -43,7 +40,7 @@ function customerId(value: string | Stripe.Customer | Stripe.DeletedCustomer | n
 async function projectSubscription(subscription: Stripe.Subscription): Promise<void> {
   const customer = customerId(subscription.customer);
   if (!customer) return;
-  const userId = subscription.metadata.vitamate_user_id || await userIdForCustomer(customer);
+  const userId = subscription.metadata.vitamate_user_id || (await userIdForCustomer(customer));
   if (!userId) return;
   await saveCustomer(userId, customer);
   const item = subscription.items.data[0];
@@ -65,7 +62,10 @@ async function stripeCustomer(userId: string): Promise<string> {
   const current = await customerIdForUser(userId);
   if (current) return current;
   const { data, error } = await requireSupabase().auth.admin.getUserById(userId);
-  if (error || !data.user) throw Object.assign(new Error('No encontramos tu cuenta.'), { statusCode: 404 });
+  if (error || !data.user)
+    throw Object.assign(new Error('No encontramos tu cuenta.'), {
+      statusCode: 404,
+    });
   const customer = await requireStripe().customers.create({
     email: data.user.email,
     name: typeof data.user.user_metadata?.full_name === 'string' ? data.user.user_metadata.full_name : undefined,
@@ -76,17 +76,15 @@ async function stripeCustomer(userId: string): Promise<string> {
 }
 
 async function activeStripeSubscriptionForCustomer(customer: string): Promise<Stripe.Subscription | null> {
-  const subscriptions = await requireStripe().subscriptions.list({ customer, status: 'all', limit: 20 });
-  return subscriptions.data
-    .filter((subscription) => ['trialing', 'active'].includes(subscription.status))
-    .sort((a, b) => b.created - a.created)[0] ?? null;
+  const subscriptions = await requireStripe().subscriptions.list({
+    customer,
+    status: 'all',
+    limit: 20,
+  });
+  return subscriptions.data.filter((subscription) => ['trialing', 'active'].includes(subscription.status)).sort((a, b) => b.created - a.created)[0] ?? null;
 }
 
-async function projectAppleTransaction(
-  transaction: Awaited<ReturnType<typeof verifyAppleTransaction>>,
-  expectedUserId?: string,
-  renewal?: Awaited<ReturnType<typeof verifyAppleRenewalInfo>>,
-): Promise<string> {
+async function projectAppleTransaction(transaction: Awaited<ReturnType<typeof verifyAppleTransaction>>, expectedUserId?: string, renewal?: Awaited<ReturnType<typeof verifyAppleRenewalInfo>>): Promise<string> {
   const interval = appleInterval(transaction.productId);
   if (!interval || !transaction.originalTransactionId || !transaction.transactionId || !transaction.expiresDate) {
     throw Object.assign(new Error('La transacción no corresponde a un producto VITAMATE Premium.'), { statusCode: 400, code: 'INVALID_APPLE_PRODUCT' });
@@ -132,12 +130,18 @@ function checkoutReturnUrl(value: string | undefined): string {
   try {
     candidate = new URL(value);
   } catch {
-    throw Object.assign(new Error('La dirección de regreso no es válida.'), { statusCode: 400, code: 'INVALID_RETURN_URL' });
+    throw Object.assign(new Error('La dirección de regreso no es válida.'), {
+      statusCode: 400,
+      code: 'INVALID_RETURN_URL',
+    });
   }
-  const configuredOrigins = new Set(config.APP_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean));
-  const allowed = configuredOrigins.has(candidate.origin)
-    || (process.env.NODE_ENV !== 'production' && isLocalDevelopmentOrigin(candidate.origin));
-  if (!allowed || candidate.protocol !== 'http:' && candidate.protocol !== 'https:') {
+  const configuredOrigins = new Set(
+    config.APP_ORIGIN.split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  );
+  const allowed = configuredOrigins.has(candidate.origin) || (process.env.NODE_ENV !== 'production' && isLocalDevelopmentOrigin(candidate.origin));
+  if (!allowed || (candidate.protocol !== 'http:' && candidate.protocol !== 'https:')) {
     throw Object.assign(new Error('La dirección de regreso no está autorizada.'), { statusCode: 400, code: 'RETURN_URL_NOT_ALLOWED' });
   }
   return candidate.origin;
@@ -172,26 +176,118 @@ export async function billingRoutes(app: FastifyInstance) {
         request.log.warn({ err: error, userId }, 'No fue posible reconciliar el estado de Stripe al consultar facturación');
       }
     }
-    let offers: Array<{ interval: 'month' | 'year'; amount: number; currency: string }> = [];
+    let offers: Array<{
+      interval: 'month' | 'year';
+      amount: number;
+      currency: string;
+    }> = [];
     if (configured && offersCache && offersCache.expiresAt > Date.now()) {
       offers = offersCache.offers;
     } else if (configured) {
-      const [monthly, annual] = await Promise.all([
-        stripe!.prices.retrieve(config.STRIPE_PRICE_MONTHLY!),
-        stripe!.prices.retrieve(config.STRIPE_PRICE_ANNUAL!),
-      ]);
+      const [monthly, annual] = await Promise.all([stripe!.prices.retrieve(config.STRIPE_PRICE_MONTHLY!), stripe!.prices.retrieve(config.STRIPE_PRICE_ANNUAL!)]);
       offers = [
-        { interval: 'month', amount: monthly.unit_amount ?? 0, currency: monthly.currency },
-        { interval: 'year', amount: annual.unit_amount ?? 0, currency: annual.currency },
+        {
+          interval: 'month',
+          amount: monthly.unit_amount ?? 0,
+          currency: monthly.currency,
+        },
+        {
+          interval: 'year',
+          amount: annual.unit_amount ?? 0,
+          currency: annual.currency,
+        },
       ];
       offersCache = { offers, expiresAt: Date.now() + 15 * 60_000 };
     }
-    return { entitlement, configured, offers };
+    return {
+      entitlement,
+      configured,
+      offers,
+      voiceBalance: await getVoiceCreditBalance(userId),
+      voiceOffers: VOICE_CREDIT_PACKAGES,
+    };
+  });
+
+  app.post('/v1/billing/voice/checkout', async (request) => {
+    const { userId } = await requireUser(request);
+    if (!(await isPremium(userId))) throw Object.assign(new Error('Los paquetes de llamada requieren VITAMATE Premium.'), { statusCode: 402, code: 'PREMIUM_REQUIRED' });
+    const { packageId, returnUrl } = z
+      .object({
+        packageId: z.enum(['voice_5', 'voice_10', 'voice_30', 'voice_60']),
+        returnUrl: z.string().url().optional(),
+      })
+      .parse(request.body);
+    const selected = voicePackage(packageId)!;
+    const appUrl = checkoutReturnUrl(returnUrl);
+    const session = await requireStripe().checkout.sessions.create({
+      mode: 'payment',
+      customer: await stripeCustomer(userId),
+      client_reference_id: userId,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: selected.currency,
+            unit_amount: selected.amount,
+            product_data: {
+              name: `${selected.minutes} minutos extra con VITACOACH`,
+              description: 'Minutos de llamada que no caducan.',
+            },
+          },
+        },
+      ],
+      success_url: `${appUrl}/cuenta?voice_topup=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/cuenta?voice_topup=cancelled`,
+      metadata: {
+        vitamate_kind: 'voice_credit',
+        vitamate_user_id: userId,
+        package_id: selected.id,
+        seconds: String(selected.seconds),
+      },
+    });
+    if (!session.url) throw new Error('Stripe no devolvió una dirección de pago.');
+    return { url: session.url };
+  });
+
+  app.post('/v1/billing/voice/reconcile-checkout', async (request) => {
+    const { userId } = await requireUser(request);
+    const { sessionId } = z.object({ sessionId: z.string().regex(/^cs_(?:test_|live_)/) }).parse(request.body);
+    const session = await requireStripe().checkout.sessions.retrieve(sessionId);
+    const selected = voicePackage(session.metadata?.package_id ?? '');
+    const owner = session.client_reference_id ?? session.metadata?.vitamate_user_id;
+    if (session.mode !== 'payment' || session.metadata?.vitamate_kind !== 'voice_credit' || owner !== userId || !selected) {
+      throw Object.assign(new Error('La compra de minutos no corresponde a tu cuenta.'), { statusCode: 403, code: 'CHECKOUT_OWNERSHIP_MISMATCH' });
+    }
+    if (session.status !== 'complete' || session.payment_status !== 'paid')
+      return {
+        reconciled: false,
+        pending: true,
+        voiceBalance: await getVoiceCreditBalance(userId),
+      };
+    await grantVoiceCredit({
+      userId,
+      provider: 'stripe',
+      reference: session.id,
+      packageId: selected.id,
+      seconds: selected.seconds,
+      amount: selected.amount,
+      currency: selected.currency,
+    });
+    return {
+      reconciled: true,
+      pending: false,
+      voiceBalance: await getVoiceCreditBalance(userId),
+    };
   });
 
   app.post('/v1/billing/checkout', async (request) => {
     const { userId } = await requireUser(request);
-    const { interval, returnUrl } = z.object({ interval: z.enum(['month', 'year']), returnUrl: z.string().url().optional() }).parse(request.body);
+    const { interval, returnUrl } = z
+      .object({
+        interval: z.enum(['month', 'year']),
+        returnUrl: z.string().url().optional(),
+      })
+      .parse(request.body);
     if (await isPremium(userId)) {
       throw Object.assign(new Error('Ya tienes Premium. Administra tu plan desde el portal.'), { statusCode: 409, code: 'SUBSCRIPTION_ALREADY_ACTIVE' });
     }
@@ -209,14 +305,26 @@ export async function billingRoutes(app: FastifyInstance) {
     const session = await stripeClient.checkout.sessions.create({
       mode: 'subscription',
       customer,
-      line_items: [{ price: interval === 'month' ? config.STRIPE_PRICE_MONTHLY! : config.STRIPE_PRICE_ANNUAL!, quantity: 1 }],
+      line_items: [
+        {
+          price: interval === 'month' ? config.STRIPE_PRICE_MONTHLY! : config.STRIPE_PRICE_ANNUAL!,
+          quantity: 1,
+        },
+      ],
       success_url: `${appUrl}/cuenta?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/cuenta?checkout=cancelled`,
       allow_promotion_codes: true,
       client_reference_id: userId,
       subscription_data: {
         metadata: { vitamate_user_id: userId },
-        ...(grantTrial ? { trial_period_days: 7, trial_settings: { end_behavior: { missing_payment_method: 'cancel' } } } : {}),
+        ...(grantTrial
+          ? {
+              trial_period_days: 7,
+              trial_settings: {
+                end_behavior: { missing_payment_method: 'cancel' },
+              },
+            }
+          : {}),
       },
       metadata: { vitamate_user_id: userId, trial_granted: String(grantTrial) },
     });
@@ -234,10 +342,18 @@ export async function billingRoutes(app: FastifyInstance) {
     }
     const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
     if (session.status !== 'complete' || !subscriptionId) {
-      return { entitlement: await getEntitlement(userId), reconciled: false, pending: true };
+      return {
+        entitlement: await getEntitlement(userId),
+        reconciled: false,
+        pending: true,
+      };
     }
     await projectSubscription(await requireStripe().subscriptions.retrieve(subscriptionId));
-    return { entitlement: await getEntitlement(userId), reconciled: true, pending: false };
+    return {
+      entitlement: await getEntitlement(userId),
+      reconciled: true,
+      pending: false,
+    };
   });
 
   app.post('/v1/billing/portal', async (request) => {
@@ -245,13 +361,21 @@ export async function billingRoutes(app: FastifyInstance) {
     const { returnUrl } = z.object({ returnUrl: z.string().url().optional() }).parse(request.body);
     const customer = await customerIdForUser(userId);
     if (!customer) throw Object.assign(new Error('Aún no tienes una cuenta de facturación.'), { statusCode: 404 });
-    const session = await requireStripe().billingPortal.sessions.create({ customer, return_url: `${checkoutReturnUrl(returnUrl)}/cuenta` });
+    const session = await requireStripe().billingPortal.sessions.create({
+      customer,
+      return_url: `${checkoutReturnUrl(returnUrl)}/cuenta`,
+    });
     return { url: session.url };
   });
 
   app.post('/v1/billing/apple/verify', async (request) => {
     const { userId } = await requireUser(request);
-    const input = z.object({ transactionId: z.string().min(8).max(100), jwsRepresentation: z.string().min(100).max(100_000) }).parse(request.body);
+    const input = z
+      .object({
+        transactionId: z.string().min(8).max(100),
+        jwsRepresentation: z.string().min(100).max(100_000),
+      })
+      .parse(request.body);
     const transaction = await verifyAppleTransaction(input.jwsRepresentation);
     if (transaction.transactionId !== input.transactionId) {
       throw Object.assign(new Error('El identificador de compra no coincide con la transacción firmada.'), { statusCode: 400, code: 'APPLE_TRANSACTION_MISMATCH' });
@@ -260,17 +384,44 @@ export async function billingRoutes(app: FastifyInstance) {
     return { entitlement: await getEntitlement(userId) };
   });
 
+  app.post('/v1/billing/voice/apple/verify', async (request) => {
+    const { userId } = await requireUser(request);
+    if (!(await isPremium(userId))) throw Object.assign(new Error('Los paquetes de llamada requieren VITAMATE Premium.'), { statusCode: 402, code: 'PREMIUM_REQUIRED' });
+    const input = z
+      .object({
+        transactionId: z.string().min(8).max(100),
+        jwsRepresentation: z.string().min(100).max(100_000),
+      })
+      .parse(request.body);
+    const transaction = await verifyAppleTransaction(input.jwsRepresentation);
+    const selected = voicePackageForAppleProduct(transaction.productId ?? '');
+    if (!selected || transaction.transactionId !== input.transactionId || transaction.revocationDate) {
+      throw Object.assign(new Error('La transacción no corresponde a un paquete de llamadas válido.'), { statusCode: 400, code: 'INVALID_APPLE_PRODUCT' });
+    }
+    if (transaction.appAccountToken !== userId) {
+      throw Object.assign(new Error('La compra no corresponde a esta cuenta VITAMATE.'), { statusCode: 403, code: 'APPLE_ACCOUNT_MISMATCH' });
+    }
+    await grantVoiceCredit({
+      userId,
+      provider: 'apple',
+      reference: transaction.transactionId!,
+      packageId: selected.id,
+      seconds: selected.seconds,
+      amount: selected.amount,
+      currency: selected.currency,
+    });
+    return { voiceBalance: await getVoiceCreditBalance(userId) };
+  });
+
   app.post('/v1/billing/apple/notifications', async (request, reply) => {
     const { signedPayload } = z.object({ signedPayload: z.string().min(100).max(200_000) }).parse(request.body);
     const notification = await verifyAppleNotification(signedPayload);
     if (!notification.notificationUUID) return reply.code(400).send({ code: 'APPLE_NOTIFICATION_MISSING_ID' });
-    if (!await claimAppleWebhookEvent(notification.notificationUUID, String(notification.notificationType ?? 'UNKNOWN'))) return { received: true, duplicate: true };
+    if (!(await claimAppleWebhookEvent(notification.notificationUUID, String(notification.notificationType ?? 'UNKNOWN')))) return { received: true, duplicate: true };
     try {
       if (notification.data?.signedTransactionInfo) {
         const transaction = await verifyAppleTransaction(notification.data.signedTransactionInfo);
-        const renewal = notification.data.signedRenewalInfo
-          ? await verifyAppleRenewalInfo(notification.data.signedRenewalInfo)
-          : undefined;
+        const renewal = notification.data.signedRenewalInfo ? await verifyAppleRenewalInfo(notification.data.signedRenewalInfo) : undefined;
         const owner = transaction.originalTransactionId ? await userIdForAppleOriginalTransaction(transaction.originalTransactionId) : null;
         if (owner || transaction.appAccountToken) await projectAppleTransaction(transaction, owner ?? transaction.appAccountToken, renewal);
       }
@@ -292,14 +443,29 @@ export async function billingRoutes(app: FastifyInstance) {
     } catch {
       return reply.code(400).send({ code: 'INVALID_SIGNATURE' });
     }
-    if (!await claimWebhookEvent(event.id, event.type)) return { received: true, duplicate: true };
+    if (!(await claimWebhookEvent(event.id, event.type))) return { received: true, duplicate: true };
     try {
       if (event.type.startsWith('customer.subscription.')) {
         await projectSubscription(event.data.object as Stripe.Subscription);
       } else if (event.type === 'checkout.session.completed') {
         const session = event.data.object as Stripe.Checkout.Session;
-        const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
-        if (subscriptionId) await projectSubscription(await stripe.subscriptions.retrieve(subscriptionId));
+        if (session.mode === 'payment' && session.metadata?.vitamate_kind === 'voice_credit' && session.payment_status === 'paid') {
+          const selected = voicePackage(session.metadata?.package_id ?? '');
+          const userId = session.client_reference_id ?? session.metadata?.vitamate_user_id;
+          if (selected && userId)
+            await grantVoiceCredit({
+              userId,
+              provider: 'stripe',
+              reference: session.id,
+              packageId: selected.id,
+              seconds: selected.seconds,
+              amount: selected.amount,
+              currency: selected.currency,
+            });
+        } else {
+          const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+          if (subscriptionId) await projectSubscription(await stripe.subscriptions.retrieve(subscriptionId));
+        }
       } else if (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') {
         const invoice = event.data.object as Stripe.Invoice;
         const parentSubscription = invoice.parent?.subscription_details?.subscription;

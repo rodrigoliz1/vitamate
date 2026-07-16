@@ -10,6 +10,7 @@ import { recordAiUsage } from '../services/openaiUsage.js';
 import { config } from '../config.js';
 import { verifySupabaseAccessToken } from '../services/supabase.js';
 import { requirePremium } from '../repositories/billingRepository.js';
+import { cancelVoiceCall, completeVoiceCall, getVoiceCreditBalance, heartbeatVoiceCall, reserveVoiceCall, startVoiceCall } from '../repositories/voiceCreditsRepository.js';
 
 const provider = new OpenAiCoachProvider();
 
@@ -19,30 +20,51 @@ const bodySchema = z.object({
   currentDateTime: z.string().datetime(),
   timezone: z.string().min(1).max(100),
   message: z.string().trim().min(1).max(1500),
-  imageDataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(6_500_000).optional(),
-  document: z.object({
-    filename: z.string().trim().min(1).max(180),
-    mimeType: z.literal('application/pdf'),
-    dataUrl: z.string().regex(/^data:application\/pdf;base64,/).max(11_000_000),
-  }).optional(),
-  history: z.array(z.object({
-    role: z.enum(['user', 'assistant']),
-    content: z.string().trim().min(1).max(3000),
-  })).max(12).default([]),
-  clientMessage: z.object({
-    id: z.string().uuid().optional(),
-    content: z.string().trim().min(1).max(3000),
-    createdAt: z.string().datetime().optional(),
-  }).optional(),
-  memory: z.array(z.object({
-    key: z.string().min(3).max(120),
-    category: z.enum(['identity', 'preference', 'goal', 'routine', 'motivation', 'constraint', 'relationship', 'health_context']),
-    content: z.string().min(1).max(500),
-    importance: z.number().int().min(1).max(5),
-    confidence: z.number().min(0).max(1),
-    expiresAt: z.string().datetime().nullable(),
-    updatedAt: z.string().datetime(),
-  })).max(40).default([]),
+  imageDataUrl: z
+    .string()
+    .regex(/^data:image\/(jpeg|png|webp);base64,/)
+    .max(6_500_000)
+    .optional(),
+  document: z
+    .object({
+      filename: z.string().trim().min(1).max(180),
+      mimeType: z.literal('application/pdf'),
+      dataUrl: z
+        .string()
+        .regex(/^data:application\/pdf;base64,/)
+        .max(11_000_000),
+    })
+    .optional(),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().trim().min(1).max(3000),
+      }),
+    )
+    .max(12)
+    .default([]),
+  clientMessage: z
+    .object({
+      id: z.string().uuid().optional(),
+      content: z.string().trim().min(1).max(3000),
+      createdAt: z.string().datetime().optional(),
+    })
+    .optional(),
+  memory: z
+    .array(
+      z.object({
+        key: z.string().min(3).max(120),
+        category: z.enum(['identity', 'preference', 'goal', 'routine', 'motivation', 'constraint', 'relationship', 'health_context']),
+        content: z.string().min(1).max(500),
+        importance: z.number().int().min(1).max(5),
+        confidence: z.number().min(0).max(1),
+        expiresAt: z.string().datetime().nullable(),
+        updatedAt: z.string().datetime(),
+      }),
+    )
+    .max(40)
+    .default([]),
   profile: z.object({
     preferredName: z.string().trim().min(1).max(80),
     primaryGoal: z.string().max(60),
@@ -67,77 +89,165 @@ const bodySchema = z.object({
     weeklyFoodBudgetMxn: finiteNumber.min(0).max(100000).default(1400),
     safetyFlags: z.array(z.string().max(80)).max(10),
   }),
-  nutritionTarget: z.object({
-    status: z.string().max(80),
-    calories: finiteNumber.nullable(),
-    proteinG: finiteNumber.nullable(),
-    carbohydratesG: finiteNumber.nullable(),
-    fatG: finiteNumber.nullable(),
-  }).optional(),
-  recentWorkouts: z.array(z.object({
-    title: z.string().max(160),
-    durationMinutes: finiteNumber.min(0).max(1000),
-    perceivedEffort: finiteNumber.min(1).max(10),
-    completedAt: z.string().datetime(),
-  })).max(5).default([]),
-  availableWorkouts: z.array(z.object({
-    title: z.string().max(160), focus: z.string().max(200), durationMinutes: finiteNumber.min(0).max(300),
-    exercises: z.array(z.string().max(160)).max(12),
-  })).max(7).default([]),
-  todayNutrition: z.object({
-    calories: finiteNumber.min(0), proteinG: finiteNumber.min(0), carbohydratesG: finiteNumber.min(0), fatG: finiteNumber.min(0),
-  }).optional(),
-  weeklyNutrition: z.object({
-    consumed: z.object({ calories: finiteNumber, proteinG: finiteNumber, carbohydratesG: finiteNumber, fatG: finiteNumber }),
-    target: z.object({ calories: finiteNumber, proteinG: finiteNumber, carbohydratesG: finiteNumber, fatG: finiteNumber }),
-    balance: z.object({ calories: finiteNumber, proteinG: finiteNumber, carbohydratesG: finiteNumber, fatG: finiteNumber }),
-  }).optional(),
-  weeklyWorkout: z.object({
-    sessions: finiteNumber, targetSessions: finiteNumber, minutes: finiteNumber, targetMinutes: finiteNumber,
-    caloriesBurned: finiteNumber, targetCalories: finiteNumber, remainingMinutes: finiteNumber, remainingCalories: finiteNumber,
-  }).optional(),
-  weightTrend: z.object({ latestKg: finiteNumber.positive(), previousKg: finiteNumber.positive().nullable() }).optional(),
-  healthDocuments: z.array(z.object({ filename: z.string().max(180), uploadedAt: z.string().datetime(), summary: z.string().max(5000) })).max(10).default([]),
-  healthSummary: z.object({ stepsToday: finiteNumber.min(0).optional(), restingHeartRate: finiteNumber.min(0).optional(), activeCaloriesToday: finiteNumber.min(0).optional(), source: z.string().max(60) }).optional(),
-  sleepSummary: z.object({
-    latestMinutes: finiteNumber.min(0).max(1440).optional(),
-    averageMinutes7Days: finiteNumber.min(0).max(1440).optional(),
-    recent: z.array(z.object({
-      startedAt: z.string().datetime(), endedAt: z.string().datetime(), durationMinutes: finiteNumber.min(0).max(1440),
-      quality: z.number().int().min(1).max(5).optional(), source: z.enum(['manual', 'apple_health', 'vitacoach']),
-    })).max(7).default([]),
-  }).optional(),
+  nutritionTarget: z
+    .object({
+      status: z.string().max(80),
+      calories: finiteNumber.nullable(),
+      proteinG: finiteNumber.nullable(),
+      carbohydratesG: finiteNumber.nullable(),
+      fatG: finiteNumber.nullable(),
+    })
+    .optional(),
+  recentWorkouts: z
+    .array(
+      z.object({
+        title: z.string().max(160),
+        durationMinutes: finiteNumber.min(0).max(1000),
+        perceivedEffort: finiteNumber.min(1).max(10),
+        completedAt: z.string().datetime(),
+      }),
+    )
+    .max(5)
+    .default([]),
+  availableWorkouts: z
+    .array(
+      z.object({
+        title: z.string().max(160),
+        focus: z.string().max(200),
+        durationMinutes: finiteNumber.min(0).max(300),
+        exercises: z.array(z.string().max(160)).max(12),
+      }),
+    )
+    .max(7)
+    .default([]),
+  todayNutrition: z
+    .object({
+      calories: finiteNumber.min(0),
+      proteinG: finiteNumber.min(0),
+      carbohydratesG: finiteNumber.min(0),
+      fatG: finiteNumber.min(0),
+    })
+    .optional(),
+  weeklyNutrition: z
+    .object({
+      consumed: z.object({
+        calories: finiteNumber,
+        proteinG: finiteNumber,
+        carbohydratesG: finiteNumber,
+        fatG: finiteNumber,
+      }),
+      target: z.object({
+        calories: finiteNumber,
+        proteinG: finiteNumber,
+        carbohydratesG: finiteNumber,
+        fatG: finiteNumber,
+      }),
+      balance: z.object({
+        calories: finiteNumber,
+        proteinG: finiteNumber,
+        carbohydratesG: finiteNumber,
+        fatG: finiteNumber,
+      }),
+    })
+    .optional(),
+  weeklyWorkout: z
+    .object({
+      sessions: finiteNumber,
+      targetSessions: finiteNumber,
+      minutes: finiteNumber,
+      targetMinutes: finiteNumber,
+      caloriesBurned: finiteNumber,
+      targetCalories: finiteNumber,
+      remainingMinutes: finiteNumber,
+      remainingCalories: finiteNumber,
+    })
+    .optional(),
+  weightTrend: z
+    .object({
+      latestKg: finiteNumber.positive(),
+      previousKg: finiteNumber.positive().nullable(),
+    })
+    .optional(),
+  healthDocuments: z
+    .array(
+      z.object({
+        filename: z.string().max(180),
+        uploadedAt: z.string().datetime(),
+        summary: z.string().max(5000),
+      }),
+    )
+    .max(10)
+    .default([]),
+  healthSummary: z
+    .object({
+      stepsToday: finiteNumber.min(0).optional(),
+      restingHeartRate: finiteNumber.min(0).optional(),
+      activeCaloriesToday: finiteNumber.min(0).optional(),
+      source: z.string().max(60),
+    })
+    .optional(),
+  sleepSummary: z
+    .object({
+      latestMinutes: finiteNumber.min(0).max(1440).optional(),
+      averageMinutes7Days: finiteNumber.min(0).max(1440).optional(),
+      recent: z
+        .array(
+          z.object({
+            startedAt: z.string().datetime(),
+            endedAt: z.string().datetime(),
+            durationMinutes: finiteNumber.min(0).max(1440),
+            quality: z.number().int().min(1).max(5).optional(),
+            source: z.enum(['manual', 'apple_health', 'vitacoach']),
+          }),
+        )
+        .max(7)
+        .default([]),
+    })
+    .optional(),
   mealPlanContext: z.string().max(60_000).optional(),
-  planChangeTarget: z.object({
-    type: z.enum(['replace_meal', 'replace_ingredient']),
-    slotId: z.string().max(160).optional(),
-    ingredient: z.string().max(240).optional(),
-  }).optional(),
+  planChangeTarget: z
+    .object({
+      type: z.enum(['replace_meal', 'replace_ingredient']),
+      slotId: z.string().max(160).optional(),
+      ingredient: z.string().max(240).optional(),
+    })
+    .optional(),
 });
 
-const realtimeSchema = bodySchema.omit({ message: true, history: true, clientMessage: true, memory: true, imageDataUrl: true, document: true });
+const realtimeSchema = bodySchema.omit({
+  message: true,
+  history: true,
+  clientMessage: true,
+  memory: true,
+  imageDataUrl: true,
+  document: true,
+});
 const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(100),
   before: z.string().datetime().optional(),
 });
 const callEventSchema = z.object({
+  callSessionId: z.string().uuid(),
   locale: z.enum(['es-MX', 'en-US']).default('es-MX'),
   durationSeconds: z.number().finite().int().min(0).max(86_400),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime(),
-  usage: z.object({
-    responses: z.number().int().min(0).max(10_000),
-    inputTokens: z.number().int().min(0).max(100_000_000),
-    cachedInputTokens: z.number().int().min(0).max(100_000_000),
-    outputTokens: z.number().int().min(0).max(100_000_000),
-    inputTextTokens: z.number().int().min(0).max(100_000_000),
-    inputAudioTokens: z.number().int().min(0).max(100_000_000),
-    cachedTextTokens: z.number().int().min(0).max(100_000_000),
-    cachedAudioTokens: z.number().int().min(0).max(100_000_000),
-    outputTextTokens: z.number().int().min(0).max(100_000_000),
-    outputAudioTokens: z.number().int().min(0).max(100_000_000),
-  }).optional(),
+  usage: z
+    .object({
+      responses: z.number().int().min(0).max(10_000),
+      inputTokens: z.number().int().min(0).max(100_000_000),
+      cachedInputTokens: z.number().int().min(0).max(100_000_000),
+      outputTokens: z.number().int().min(0).max(100_000_000),
+      inputTextTokens: z.number().int().min(0).max(100_000_000),
+      inputAudioTokens: z.number().int().min(0).max(100_000_000),
+      cachedTextTokens: z.number().int().min(0).max(100_000_000),
+      cachedAudioTokens: z.number().int().min(0).max(100_000_000),
+      outputTextTokens: z.number().int().min(0).max(100_000_000),
+      outputAudioTokens: z.number().int().min(0).max(100_000_000),
+    })
+    .optional(),
 });
+const callSessionSchema = z.object({ callSessionId: z.string().uuid() });
 
 async function authenticatedIdentity(request: { headers: { authorization?: string }; ip: string }) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -148,12 +258,23 @@ async function authenticatedIdentity(request: { headers: { authorization?: strin
 export async function coachRoutes(app: FastifyInstance) {
   app.get('/v1/coach/history', async (request, reply) => {
     const { token, userId } = await authenticatedIdentity(request);
-    if (token && !userId) return reply.code(401).send({ code: 'INVALID_SESSION', message: 'Tu sesión venció. Vuelve a iniciar sesión.' });
-    if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para recuperar tu conversación.' });
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para recuperar tu conversación.',
+      });
     await requirePremium(userId);
     const query = historyQuerySchema.parse(request.query);
     try {
-      return { messages: await listCoachMessages(userId, query.limit, query.before), persisted: true };
+      return {
+        messages: await listCoachMessages(userId, query.limit, query.before),
+        persisted: true,
+      };
     } catch (error) {
       request.log.error({ error, userId }, 'No fue posible cargar el historial remoto de VITACOACH; se continuará con el historial local.');
       return { messages: [], persisted: false };
@@ -162,10 +283,22 @@ export async function coachRoutes(app: FastifyInstance) {
 
   app.post('/v1/coach/chat', async (request, reply) => {
     const { token, userId } = await authenticatedIdentity(request);
-    if (token && !userId) return reply.code(401).send({ code: 'INVALID_SESSION', message: 'Tu sesión venció. Vuelve a iniciar sesión.' });
-    if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para hablar con VITACOACH.' });
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para hablar con VITACOACH.',
+      });
     await requirePremium(userId);
-    if (!await allowPersistentRequest(`coach:${userId}`, 20)) return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera un momento antes de enviar otro mensaje.' });
+    if (!(await allowPersistentRequest(`coach:${userId}`, 20)))
+      return reply.code(429).send({
+        code: 'RATE_LIMITED',
+        message: 'Espera un momento antes de enviar otro mensaje.',
+      });
     const body = bodySchema.parse(request.body);
     const safetyIdentifier = createHash('sha256').update(`vitamate:${userId}`).digest('hex');
     let durableState = null;
@@ -178,7 +311,13 @@ export async function coachRoutes(app: FastifyInstance) {
     }
     if (userId && durableState && !durableState.memories.length && body.memory.length) {
       await seedCoachMemories(userId, body.memory);
-      durableState.memories = body.memory.map((memory) => ({ key: memory.key, category: memory.category, content: memory.content, importance: memory.importance, lastConfirmedAt: memory.updatedAt }));
+      durableState.memories = body.memory.map((memory) => ({
+        key: memory.key,
+        category: memory.category,
+        content: memory.content,
+        importance: memory.importance,
+        lastConfirmedAt: memory.updatedAt,
+      }));
     }
     const modelContext = {
       locale: body.locale,
@@ -198,21 +337,50 @@ export async function coachRoutes(app: FastifyInstance) {
       mealPlanContext: body.mealPlanContext,
       planChangeTarget: body.planChangeTarget,
     };
-    const response = await tryDeterministicCoachReply(body.message, body.currentDateTime, body.timezone, body.locale) ?? await provider.reply(
-      modelContext,
-      durableState?.messages ?? body.history,
-      body.message,
-      { imageDataUrl: body.imageDataUrl, document: body.document },
-      durableState?.memories ?? body.memory.map((memory) => ({ key: memory.key, category: memory.category, content: memory.content, importance: memory.importance, lastConfirmedAt: memory.updatedAt })),
-      durableState?.conversationSummary ?? '',
-      safetyIdentifier,
-    );
+    const response =
+      (await tryDeterministicCoachReply(body.message, body.currentDateTime, body.timezone, body.locale)) ??
+      (await provider.reply(
+        modelContext,
+        durableState?.messages ?? body.history,
+        body.message,
+        { imageDataUrl: body.imageDataUrl, document: body.document },
+        durableState?.memories ??
+          body.memory.map((memory) => ({
+            key: memory.key,
+            category: memory.category,
+            content: memory.content,
+            importance: memory.importance,
+            lastConfirmedAt: memory.updatedAt,
+          })),
+        durableState?.conversationSummary ?? '',
+        safetyIdentifier,
+      ));
     if (response.model !== 'none') {
-      request.log.info({ userId, task: response.task, model: response.model, usage: response.usage }, 'Consumo de VITACOACH');
-      await recordAiUsage({ userId, task: `coach_${response.task}`, model: response.model, usage: response.usage, metadata: { historyMessages: (durableState?.messages ?? body.history).length } })
-        .catch((error) => request.log.warn({ error, userId }, 'No fue posible guardar la telemetría de tokens.'));
+      request.log.info(
+        {
+          userId,
+          task: response.task,
+          model: response.model,
+          usage: response.usage,
+        },
+        'Consumo de VITACOACH',
+      );
+      await recordAiUsage({
+        userId,
+        task: `coach_${response.task}`,
+        model: response.model,
+        usage: response.usage,
+        metadata: {
+          historyMessages: (durableState?.messages ?? body.history).length,
+        },
+      }).catch((error) => request.log.warn({ error, userId }, 'No fue posible guardar la telemetría de tokens.'));
     }
-    const fallbackAssistantMessage = { id: randomUUID(), role: 'assistant' as const, content: response.message, createdAt: new Date().toISOString() };
+    const fallbackAssistantMessage = {
+      id: randomUUID(),
+      role: 'assistant' as const,
+      content: response.message,
+      createdAt: new Date().toISOString(),
+    };
     let persisted = null;
     if (userId && durableState) {
       try {
@@ -233,8 +401,19 @@ export async function coachRoutes(app: FastifyInstance) {
         const messages = await loadMessagesForCoachSummary(durableState.threadId, 24);
         const summary = await provider.summarize(durableState.conversationSummary, messages, safetyIdentifier);
         await Promise.all([
-          persistCoachSummary({ userId, threadId: durableState.threadId, summary: summary.summary, summarizedMessageCount: nextMessageCount }),
-          recordAiUsage({ userId, task: 'coach_summary', model: summary.model, usage: summary.usage, metadata: { messages: messages.length } }),
+          persistCoachSummary({
+            userId,
+            threadId: durableState.threadId,
+            summary: summary.summary,
+            summarizedMessageCount: nextMessageCount,
+          }),
+          recordAiUsage({
+            userId,
+            task: 'coach_summary',
+            model: summary.model,
+            usage: summary.usage,
+            metadata: { messages: messages.length },
+          }),
         ]);
       } catch (error) {
         request.log.warn({ error, userId }, 'No fue posible actualizar el resumen durable de VITACOACH.');
@@ -251,8 +430,16 @@ export async function coachRoutes(app: FastifyInstance) {
 
   app.post('/v1/coach/calls', async (request, reply) => {
     const { token, userId } = await authenticatedIdentity(request);
-    if (token && !userId) return reply.code(401).send({ code: 'INVALID_SESSION', message: 'Tu sesión venció. Vuelve a iniciar sesión.' });
-    if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para llamar a VITACOACH.' });
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para llamar a VITACOACH.',
+      });
     await requirePremium(userId);
     const body = callEventSchema.parse(request.body);
     const duration = Math.max(0, body.durationSeconds);
@@ -280,16 +467,72 @@ export async function coachRoutes(app: FastifyInstance) {
         },
       }).catch((error) => request.log.warn({ error, userId }, 'No fue posible registrar el consumo de la llamada.'));
     }
-    return { recorded: true };
+    const call = await completeVoiceCall(userId, body.callSessionId);
+    return {
+      recorded: true,
+      call,
+      voiceBalance: await getVoiceCreditBalance(userId),
+    };
+  });
+
+  app.post('/v1/coach/calls/start', async (request, reply) => {
+    const { token, userId } = await authenticatedIdentity(request);
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para llamar a VITACOACH.',
+      });
+    await requirePremium(userId);
+    const { callSessionId } = callSessionSchema.parse(request.body);
+    await startVoiceCall(userId, callSessionId);
+    return { started: true };
+  });
+
+  app.post('/v1/coach/calls/heartbeat', async (request, reply) => {
+    const { token, userId } = await authenticatedIdentity(request);
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para llamar a VITACOACH.',
+      });
+    const { callSessionId } = callSessionSchema.parse(request.body);
+    const active = await heartbeatVoiceCall(userId, callSessionId);
+    return { active };
   });
 
   app.post('/v1/coach/realtime-token', async (request, reply) => {
     const { token, userId } = await authenticatedIdentity(request);
-    if (token && !userId) return reply.code(401).send({ code: 'INVALID_SESSION', message: 'Tu sesión venció. Vuelve a iniciar sesión.' });
-    if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para llamar a VITACOACH.' });
+    if (token && !userId)
+      return reply.code(401).send({
+        code: 'INVALID_SESSION',
+        message: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      });
+    if (!userId)
+      return reply.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Inicia sesión para llamar a VITACOACH.',
+      });
     await requirePremium(userId);
-    if (!config.OPENAI_API_KEY) return reply.code(503).send({ code: 'REALTIME_NOT_CONFIGURED', message: 'La llamada Realtime todavía no está configurada.' });
-    if (!await allowPersistentRequest(`realtime:${userId}`, 8)) return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera un momento antes de iniciar otra llamada.' });
+    if (!config.OPENAI_API_KEY)
+      return reply.code(503).send({
+        code: 'REALTIME_NOT_CONFIGURED',
+        message: 'La llamada Realtime todavía no está configurada.',
+      });
+    if (!(await allowPersistentRequest(`realtime:${userId}`, 8)))
+      return reply.code(429).send({
+        code: 'RATE_LIMITED',
+        message: 'Espera un momento antes de iniciar otra llamada.',
+      });
     const context = realtimeSchema.parse(request.body);
     let durableState = null;
     try {
@@ -297,138 +540,242 @@ export async function coachRoutes(app: FastifyInstance) {
     } catch (error) {
       request.log.error({ error, userId }, 'No fue posible cargar la memoria remota de VITACOACH; la llamada continuará con el contexto local.');
     }
-    const safetyIdentifier = createHash('sha256').update(`vitamate:${userId ?? request.ip}`).digest('hex');
+    const safetyIdentifier = createHash('sha256')
+      .update(`vitamate:${userId ?? request.ip}`)
+      .digest('hex');
     const realtimeContext = compactRealtimeCoachContext(context);
     const realtimeMemory = selectRelevantMemories('', 'progress', durableState?.memories ?? [])
       .slice(0, 6)
-      .map(({ key, category, content, importance }) => ({ key, category, content: content.slice(0, 240), importance }));
+      .map(({ key, category, content, importance }) => ({
+        key,
+        category,
+        content: content.slice(0, 240),
+        importance,
+      }));
     const conversationSummary = (durableState?.conversationSummary ?? '').slice(0, 1_800);
-    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'OpenAI-Safety-Identifier': safetyIdentifier,
-      },
-      body: JSON.stringify({
-        session: {
-          type: 'realtime',
-          model: config.OPENAI_REALTIME_MODEL,
-          output_modalities: ['audio'],
-          instructions: `Eres VITACOACH en una llamada privada auténtica: coach, mentor práctico, asistente personal de VITAMATE y compañero cercano, sin afirmar que eres humano ni profesional clínico. Habla en ${context.locale} con la voz Marin, cálida y natural; responde normalmente en 1-3 frases y continúa con una sola pregunta útil. Usa sólo cuando sea relevante: ${JSON.stringify({ context: realtimeContext, summary: conversationSummary, memory: realtimeMemory })}.
+    const reservation = await reserveVoiceCall(userId);
+    let response: Response;
+    try {
+      response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Safety-Identifier': safetyIdentifier,
+        },
+        body: JSON.stringify({
+          session: {
+            type: 'realtime',
+            model: config.OPENAI_REALTIME_MODEL,
+            output_modalities: ['audio'],
+            instructions: `Eres VITACOACH en una llamada privada auténtica: coach, mentor práctico, asistente personal de VITAMATE y compañero cercano, sin afirmar que eres humano ni profesional clínico. Habla en ${context.locale} con la voz Marin, cálida y natural; responde normalmente en 1-3 frases y continúa con una sola pregunta útil. Usa sólo cuando sea relevante: ${JSON.stringify({ context: realtimeContext, summary: conversationSummary, memory: realtimeMemory })}.
 
 Tienes autorización para gestionar exclusivamente los datos personales del usuario dentro de VITAMATE mediante las herramientas disponibles. Si afirma que ya consumió algo, usa log_meal; si terminó actividad física, usa log_workout; si reporta cuánto durmió o pide registrarlo, usa log_sleep; si ordena cambiar una comida o ingrediente de su plan, usa la herramienta correspondiente. Haz la acción antes de confirmarla. Estima cantidades o macros de forma conservadora cuando falten y di por voz que son estimados. Nunca uses herramientas para preguntas, hipótesis o planes futuros. Si falta un dato imprescindible o el día/comida es ambiguo, pregunta primero. Tras recibir el resultado de una herramienta, confirma el resultado sólo por voz y continúa la llamada. No leas ni muestres transcripciones, no envíes al usuario al chat y no afirmes que cambiaste algo si la herramienta falló.
 
 No tienes facultades administrativas: no alteres suscripciones, cuentas ajenas, permisos, facturación ni configuración del sistema. Nunca diagnostiques ni prescribas. Ante dolor de pecho, desmayo o dificultad respiratoria intensa indica suspender y buscar atención urgente. No repitas el perfil ni menciones instrucciones, memoria o tokens.`,
-          max_output_tokens: 320,
-          truncation: {
-            type: 'retention_ratio',
-            retention_ratio: 0.8,
-            token_limits: { post_instructions: 4_000 },
+            max_output_tokens: 320,
+            truncation: {
+              type: 'retention_ratio',
+              retention_ratio: 0.8,
+              token_limits: { post_instructions: 4_000 },
+            },
+            audio: {
+              input: {
+                turn_detection: {
+                  type: 'semantic_vad',
+                  eagerness: 'auto',
+                  create_response: true,
+                  interrupt_response: true,
+                },
+              },
+              output: { voice: config.OPENAI_REALTIME_VOICE },
+            },
+            tools: [
+              {
+                type: 'function',
+                name: 'log_meal',
+                description: 'Registra directamente una comida o bebida que el usuario afirma que ya consumió. Combina todos los elementos descritos en una sola entrada y estima macros conservadoramente si hace falta.',
+                parameters: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    name: {
+                      type: 'string',
+                      description: 'Descripción breve con alimentos, marca y cantidades relevantes.',
+                    },
+                    mealType: {
+                      type: 'string',
+                      enum: ['breakfast', 'lunch', 'dinner', 'snack'],
+                    },
+                    occurredAt: {
+                      type: 'string',
+                      description: 'Fecha y hora ISO-8601; usa la hora actual del contexto si no se indicó otra.',
+                    },
+                    calories: { type: 'number', minimum: 0, maximum: 10000 },
+                    proteinG: { type: 'number', minimum: 0, maximum: 1000 },
+                    carbohydratesG: {
+                      type: 'number',
+                      minimum: 0,
+                      maximum: 1000,
+                    },
+                    fatG: { type: 'number', minimum: 0, maximum: 1000 },
+                  },
+                  required: ['name', 'mealType', 'occurredAt', 'calories', 'proteinG', 'carbohydratesG', 'fatG'],
+                },
+              },
+              {
+                type: 'function',
+                name: 'log_workout',
+                description: 'Registra directamente actividad física que el usuario afirma que ya realizó.',
+                parameters: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: 'string' },
+                    activityType: {
+                      type: 'string',
+                      enum: ['strength', 'cardio', 'mobility', 'sport', 'other'],
+                    },
+                    occurredAt: {
+                      type: 'string',
+                      description: 'Fecha y hora ISO-8601.',
+                    },
+                    durationMinutes: {
+                      type: 'number',
+                      minimum: 1,
+                      maximum: 1440,
+                    },
+                    caloriesBurned: {
+                      type: 'number',
+                      minimum: 0,
+                      maximum: 20000,
+                    },
+                    perceivedEffort: {
+                      type: 'number',
+                      minimum: 1,
+                      maximum: 10,
+                    },
+                  },
+                  required: ['title', 'activityType', 'occurredAt', 'durationMinutes', 'caloriesBurned', 'perceivedEffort'],
+                },
+              },
+              {
+                type: 'function',
+                name: 'log_sleep',
+                description: 'Registra un periodo de sueño que el usuario afirma haber completado.',
+                parameters: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    startedAt: {
+                      type: 'string',
+                      description: 'Inicio ISO-8601 del periodo de sueño.',
+                    },
+                    endedAt: {
+                      type: 'string',
+                      description: 'Fin ISO-8601 del periodo de sueño.',
+                    },
+                    durationMinutes: {
+                      type: 'number',
+                      minimum: 30,
+                      maximum: 1440,
+                    },
+                    quality: {
+                      type: 'number',
+                      minimum: 1,
+                      maximum: 5,
+                      description: 'Sólo si el usuario describió la calidad.',
+                    },
+                    note: {
+                      type: 'string',
+                      description: 'Nota breve opcional basada sólo en lo expresado.',
+                    },
+                  },
+                  required: ['startedAt', 'endedAt', 'durationMinutes'],
+                },
+              },
+              {
+                type: 'function',
+                name: 'replace_plan_meal',
+                description: 'Sustituye una comida concreta del plan actual y actualiza su lista del súper. Úsala sólo con un slotId exacto del contexto.',
+                parameters: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    slotId: { type: 'string' },
+                    optionId: { type: 'string' },
+                    name: { type: 'string' },
+                    mealType: {
+                      type: 'string',
+                      enum: ['breakfast', 'lunch', 'dinner', 'snack'],
+                    },
+                    calories: { type: 'number', minimum: 0, maximum: 5000 },
+                    proteinG: { type: 'number', minimum: 0, maximum: 500 },
+                    carbohydratesG: {
+                      type: 'number',
+                      minimum: 0,
+                      maximum: 500,
+                    },
+                    fatG: { type: 'number', minimum: 0, maximum: 500 },
+                    ingredients: {
+                      type: 'array',
+                      maxItems: 20,
+                      items: { type: 'string' },
+                    },
+                    steps: {
+                      type: 'array',
+                      maxItems: 12,
+                      items: { type: 'string' },
+                    },
+                    prepMinutes: { type: 'number', minimum: 1, maximum: 600 },
+                    difficulty: {
+                      type: 'string',
+                      enum: ['basic', 'intermediate', 'advanced'],
+                    },
+                  },
+                  required: ['slotId', 'optionId', 'name', 'mealType', 'calories', 'proteinG', 'carbohydratesG', 'fatG', 'ingredients', 'steps', 'prepMinutes', 'difficulty'],
+                },
+              },
+              {
+                type: 'function',
+                name: 'replace_plan_ingredient',
+                description: 'Sustituye un ingrediente concreto del plan y su lista del súper. Usa el texto exacto del ingrediente existente y un reemplazo con cantidad.',
+                parameters: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    slotId: {
+                      type: 'string',
+                      description: 'Slot exacto cuando se conoce; cadena vacía si el cambio aplica a todas sus apariciones.',
+                    },
+                    ingredientToReplace: { type: 'string' },
+                    replacementIngredient: { type: 'string' },
+                  },
+                  required: ['slotId', 'ingredientToReplace', 'replacementIngredient'],
+                },
+              },
+            ],
+            tool_choice: 'auto',
           },
-          audio: {
-            input: {
-              turn_detection: {
-                type: 'semantic_vad',
-                eagerness: 'auto',
-                create_response: true,
-                interrupt_response: true,
-              },
-            },
-            output: { voice: config.OPENAI_REALTIME_VOICE },
-          },
-          tools: [
-            {
-              type: 'function',
-              name: 'log_meal',
-              description: 'Registra directamente una comida o bebida que el usuario afirma que ya consumió. Combina todos los elementos descritos en una sola entrada y estima macros conservadoramente si hace falta.',
-              parameters: {
-                type: 'object', additionalProperties: false,
-                properties: {
-                  name: { type: 'string', description: 'Descripción breve con alimentos, marca y cantidades relevantes.' },
-                  mealType: { type: 'string', enum: ['breakfast', 'lunch', 'dinner', 'snack'] },
-                  occurredAt: { type: 'string', description: 'Fecha y hora ISO-8601; usa la hora actual del contexto si no se indicó otra.' },
-                  calories: { type: 'number', minimum: 0, maximum: 10000 },
-                  proteinG: { type: 'number', minimum: 0, maximum: 1000 },
-                  carbohydratesG: { type: 'number', minimum: 0, maximum: 1000 },
-                  fatG: { type: 'number', minimum: 0, maximum: 1000 },
-                },
-                required: ['name', 'mealType', 'occurredAt', 'calories', 'proteinG', 'carbohydratesG', 'fatG'],
-              },
-            },
-            {
-              type: 'function',
-              name: 'log_workout',
-              description: 'Registra directamente actividad física que el usuario afirma que ya realizó.',
-              parameters: {
-                type: 'object', additionalProperties: false,
-                properties: {
-                  title: { type: 'string' },
-                  activityType: { type: 'string', enum: ['strength', 'cardio', 'mobility', 'sport', 'other'] },
-                  occurredAt: { type: 'string', description: 'Fecha y hora ISO-8601.' },
-                  durationMinutes: { type: 'number', minimum: 1, maximum: 1440 },
-                  caloriesBurned: { type: 'number', minimum: 0, maximum: 20000 },
-                  perceivedEffort: { type: 'number', minimum: 1, maximum: 10 },
-                },
-                required: ['title', 'activityType', 'occurredAt', 'durationMinutes', 'caloriesBurned', 'perceivedEffort'],
-              },
-            },
-            {
-              type: 'function',
-              name: 'log_sleep',
-              description: 'Registra un periodo de sueño que el usuario afirma haber completado.',
-              parameters: {
-                type: 'object', additionalProperties: false,
-                properties: {
-                  startedAt: { type: 'string', description: 'Inicio ISO-8601 del periodo de sueño.' },
-                  endedAt: { type: 'string', description: 'Fin ISO-8601 del periodo de sueño.' },
-                  durationMinutes: { type: 'number', minimum: 30, maximum: 1440 },
-                  quality: { type: 'number', minimum: 1, maximum: 5, description: 'Sólo si el usuario describió la calidad.' },
-                  note: { type: 'string', description: 'Nota breve opcional basada sólo en lo expresado.' },
-                },
-                required: ['startedAt', 'endedAt', 'durationMinutes'],
-              },
-            },
-            {
-              type: 'function',
-              name: 'replace_plan_meal',
-              description: 'Sustituye una comida concreta del plan actual y actualiza su lista del súper. Úsala sólo con un slotId exacto del contexto.',
-              parameters: {
-                type: 'object', additionalProperties: false,
-                properties: {
-                  slotId: { type: 'string' }, optionId: { type: 'string' }, name: { type: 'string' },
-                  mealType: { type: 'string', enum: ['breakfast', 'lunch', 'dinner', 'snack'] },
-                  calories: { type: 'number', minimum: 0, maximum: 5000 }, proteinG: { type: 'number', minimum: 0, maximum: 500 },
-                  carbohydratesG: { type: 'number', minimum: 0, maximum: 500 }, fatG: { type: 'number', minimum: 0, maximum: 500 },
-                  ingredients: { type: 'array', maxItems: 20, items: { type: 'string' } },
-                  steps: { type: 'array', maxItems: 12, items: { type: 'string' } },
-                  prepMinutes: { type: 'number', minimum: 1, maximum: 600 },
-                  difficulty: { type: 'string', enum: ['basic', 'intermediate', 'advanced'] },
-                },
-                required: ['slotId', 'optionId', 'name', 'mealType', 'calories', 'proteinG', 'carbohydratesG', 'fatG', 'ingredients', 'steps', 'prepMinutes', 'difficulty'],
-              },
-            },
-            {
-              type: 'function',
-              name: 'replace_plan_ingredient',
-              description: 'Sustituye un ingrediente concreto del plan y su lista del súper. Usa el texto exacto del ingrediente existente y un reemplazo con cantidad.',
-              parameters: {
-                type: 'object', additionalProperties: false,
-                properties: {
-                  slotId: { type: 'string', description: 'Slot exacto cuando se conoce; cadena vacía si el cambio aplica a todas sus apariciones.' },
-                  ingredientToReplace: { type: 'string' },
-                  replacementIngredient: { type: 'string' },
-                },
-                required: ['slotId', 'ingredientToReplace', 'replacementIngredient'],
-              },
-            },
-          ],
-          tool_choice: 'auto',
-        },
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) return reply.code(502).send({ code: 'REALTIME_TOKEN_FAILED', message: `OpenAI Realtime respondió ${response.status}.` });
-    return response.json();
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      await cancelVoiceCall(userId, reservation.callSessionId);
+      throw error;
+    }
+    if (!response.ok) {
+      await cancelVoiceCall(userId, reservation.callSessionId);
+      return reply.code(502).send({
+        code: 'REALTIME_TOKEN_FAILED',
+        message: `OpenAI Realtime respondió ${response.status}.`,
+      });
+    }
+    const tokenResponse = (await response.json()) as Record<string, unknown>;
+    return {
+      ...tokenResponse,
+      ...reservation,
+      voiceBalance: await getVoiceCreditBalance(userId),
+    };
   });
 }

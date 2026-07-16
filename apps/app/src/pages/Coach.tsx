@@ -4,9 +4,10 @@ import { useLocation } from 'react-router-dom';
 import { callOutline, cameraOutline, chatbubbleEllipsesOutline, checkmarkCircleOutline, closeOutline, documentAttachOutline, folderOpenOutline, imagesOutline, micOutline, micOffOutline, paperPlaneOutline, refreshOutline, shieldCheckmarkOutline, sparklesOutline } from 'ionicons/icons';
 import { buildWeeklyNutritionBalance, buildWeeklyWorkoutBalance, summarizeNutritionDay, weeklyMealPlanForDate, type CoachChatMessage, type CoachMemoryUpdate, type HealthDocumentSummary, type MealEntry, type MealPlanOption, type MealType, type SleepEntry, type WorkoutSession } from '@vitamate/domain';
 import { BrandMark } from '../components/BrandMark';
+import { VoiceCreditsModal } from '../components/VoiceCreditsModal';
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, recordCoachCall, sendCoachMessage, type CoachAction, type CoachChatContext, type PhotoAnalysis, type RealtimeCallUsage } from '../services/api';
+import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, heartbeatCoachCall, recordCoachCall, sendCoachMessage, startCoachCall, type CoachAction, type CoachChatContext, type PhotoAnalysis, type RealtimeCallUsage, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
 import { pickNativePhoto, type NativePhotoSource } from '../services/nativeCamera';
 import { isNativeIos } from '../services/nativePlatform';
 import { prepareFoodPhoto } from '../services/imageCompression';
@@ -14,10 +15,21 @@ import { prepareFoodPhoto } from '../services/imageCompression';
 interface CoachProps {
   snapshot: VitamateSnapshot;
   healthSummary?: CoachChatContext['healthSummary'];
+  voiceBalance: VoiceCreditBalance | null;
+  voiceOffers: VoiceCreditOffer[];
+  billingBusy: boolean;
+  billingMessage: string;
+  onRefreshVoice(): Promise<unknown>;
+  onPurchaseVoice(offer: VoiceCreditOffer): Promise<unknown>;
+  onVoiceBalance(balance: VoiceCreditBalance): void;
   onAppendMessages: (messages: CoachChatMessage[]) => void;
   onMergeMessages: (messages: CoachChatMessage[]) => void;
   onApplyMemoryUpdates: (updates: CoachMemoryUpdate[]) => void;
-  onAddMeal(meal: Omit<MealEntry, 'id' | 'createdAt' | 'source' | 'confirmed'> & { source?: MealEntry['source'] }): string;
+  onAddMeal(
+    meal: Omit<MealEntry, 'id' | 'createdAt' | 'source' | 'confirmed'> & {
+      source?: MealEntry['source'];
+    },
+  ): string;
   onDeleteMeal(id: string): void;
   onAddManualWorkout(workout: { title: string; activityType: WorkoutSession['activityType']; completedAt: string; durationMinutes: number; caloriesBurned: number; perceivedEffort: number }): string;
   onDeleteWorkout(id: string): void;
@@ -40,7 +52,10 @@ function createId(): string {
   if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
   const bytes = new Uint8Array(16);
   if (cryptoApi) cryptoApi.getRandomValues(bytes);
-  else bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  else
+    bytes.forEach((_, index) => {
+      bytes[index] = Math.floor(Math.random() * 256);
+    });
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const value = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -55,9 +70,14 @@ function inferMealType(date = new Date()): MealType {
   return 'snack';
 }
 
-const MEAL_LABELS: Record<MealType, string> = { breakfast: 'Desayuno', lunch: 'Comida', dinner: 'Cena', snack: 'Colación' };
+const MEAL_LABELS: Record<MealType, string> = {
+  breakfast: 'Desayuno',
+  lunch: 'Comida',
+  dinner: 'Cena',
+  snack: 'Colación',
+};
 
-const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onApplyMemoryUpdates, onAddMeal, onDeleteMeal, onAddManualWorkout, onDeleteWorkout, onAddSleep, onDeleteSleep, onAddHealthDocument, onReplaceMealPlanOption, onReplaceMealPlanIngredient }: CoachProps) => {
+const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy, billingMessage, onRefreshVoice, onPurchaseVoice, onVoiceBalance, onAppendMessages, onMergeMessages, onApplyMemoryUpdates, onAddMeal, onDeleteMeal, onAddManualWorkout, onDeleteWorkout, onAddSleep, onDeleteSleep, onAddHealthDocument, onReplaceMealPlanOption, onReplaceMealPlanIngredient }: CoachProps) => {
   const profile = snapshot.profile!;
   const location = useLocation();
   const uiLocale = resolveUiLocale(profile.locale);
@@ -67,17 +87,25 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
   const [error, setError] = useState('');
   const [pendingMeal, setPendingMeal] = useState<PendingPhotoMeal | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceCatalogOpen, setVoiceCatalogOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
-  const [lastAction, setLastAction] = useState<{ kind: 'meal' | 'workout' | 'sleep' | 'plan'; id?: string; label: string } | null>(null);
+  const [lastAction, setLastAction] = useState<{
+    kind: 'meal' | 'workout' | 'sleep' | 'plan';
+    id?: string;
+    label: string;
+  } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLElement>(null);
   const photoAlbumRef = useRef<HTMLInputElement>(null);
   const photoCameraRef = useRef<HTMLInputElement>(null);
   const photoFileRef = useRef<HTMLInputElement>(null);
   const documentRef = useRef<HTMLInputElement>(null);
-  const suggestions = english
-    ? ['Plan my day', 'How can I reach my protein goal?', 'Be honest about my progress']
-    : ['Planea mi día', '¿Cómo alcanzo mi proteína?', 'Sé honesto con mi progreso'];
+  const suggestions = english ? ['Plan my day', 'How can I reach my protein goal?', 'Be honest about my progress'] : ['Planea mi día', '¿Cómo alcanzo mi proteína?', 'Sé honesto con mi progreso'];
+  const openVoice = () => {
+    void onRefreshVoice();
+    if (voiceBalance && voiceBalance.totalRemainingSeconds <= 0) setVoiceCatalogOpen(true);
+    else setVoiceOpen(true);
+  };
 
   const context = (message = '', includeActionContext = false): CoachChatContext => {
     const todayNutrition = summarizeNutritionDay(snapshot.meals);
@@ -88,11 +116,18 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     const recentSleep = snapshot.sleepEntries.slice(0, 7);
     const parameters = new URLSearchParams(location.search);
     const planAction = parameters.get('planAction');
-    const planChangeTarget = planAction === 'replace_meal'
-      ? { type: 'replace_meal' as const, slotId: parameters.get('planSlotId') ?? undefined }
-      : planAction === 'replace_ingredient'
-        ? { type: 'replace_ingredient' as const, ingredient: parameters.get('ingredient') ?? undefined }
-        : undefined;
+    const planChangeTarget =
+      planAction === 'replace_meal'
+        ? {
+            type: 'replace_meal' as const,
+            slotId: parameters.get('planSlotId') ?? undefined,
+          }
+        : planAction === 'replace_ingredient'
+          ? {
+              type: 'replace_ingredient' as const,
+              ingredient: parameters.get('ingredient') ?? undefined,
+            }
+          : undefined;
     const normalizedMessage = message.toLocaleLowerCase('es-MX');
     const needsPlan = includeActionContext || Boolean(planChangeTarget) || /(cambia|reemplaza|sustituye|intercambia).*(plan|menú|menu|comida|ingrediente)/.test(normalizedMessage);
     const needsHealthDocuments = /laboratorio|análisis|analisis|estudio|documento|pdf|resultado|glucosa|colesterol/.test(normalizedMessage);
@@ -102,31 +137,85 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       currentDateTime: new Date().toISOString(),
       timezone: profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       profile: {
-        preferredName: profile.preferredName, primaryGoal: profile.primaryGoal, activityLevel: profile.activityLevel,
-        weeklyTrainingDays: profile.weeklyTrainingDays, trainingMinutes: profile.trainingMinutes, equipment: profile.equipment,
-        dietaryPattern: profile.dietaryPattern, coachStyle: profile.coachStyle, safetyFlags: profile.safetyFlags,
-        favoriteFoods: profile.favoriteFoods ?? [], dislikedFoods: profile.dislikedFoods ?? [], allergies: profile.allergies ?? [],
-        preferredCuisines: profile.preferredCuisines ?? [], mealsPerDay: profile.mealsPerDay, cookingLevel: profile.cookingLevel,
-        supplements: profile.supplements ?? [], trainingPreference: profile.trainingPreference, preferredSport: profile.preferredSport,
-        mealPreparationPreference: profile.mealPreparationPreference, mealPrepStructure: profile.mealPrepStructure,
-        mealPrepRotationDays: profile.mealPrepRotationDays, weeklyFoodBudgetMxn: profile.weeklyFoodBudgetMxn,
+        preferredName: profile.preferredName,
+        primaryGoal: profile.primaryGoal,
+        activityLevel: profile.activityLevel,
+        weeklyTrainingDays: profile.weeklyTrainingDays,
+        trainingMinutes: profile.trainingMinutes,
+        equipment: profile.equipment,
+        dietaryPattern: profile.dietaryPattern,
+        coachStyle: profile.coachStyle,
+        safetyFlags: profile.safetyFlags,
+        favoriteFoods: profile.favoriteFoods ?? [],
+        dislikedFoods: profile.dislikedFoods ?? [],
+        allergies: profile.allergies ?? [],
+        preferredCuisines: profile.preferredCuisines ?? [],
+        mealsPerDay: profile.mealsPerDay,
+        cookingLevel: profile.cookingLevel,
+        supplements: profile.supplements ?? [],
+        trainingPreference: profile.trainingPreference,
+        preferredSport: profile.preferredSport,
+        mealPreparationPreference: profile.mealPreparationPreference,
+        mealPrepStructure: profile.mealPrepStructure,
+        mealPrepRotationDays: profile.mealPrepRotationDays,
+        weeklyFoodBudgetMxn: profile.weeklyFoodBudgetMxn,
       },
-      nutritionTarget: snapshot.nutritionTarget ? {
-        status: snapshot.nutritionTarget.status, calories: snapshot.nutritionTarget.calories, proteinG: snapshot.nutritionTarget.proteinG,
-        carbohydratesG: snapshot.nutritionTarget.carbohydratesG, fatG: snapshot.nutritionTarget.fatG,
-      } : undefined,
-      recentWorkouts: snapshot.workoutSessions.slice(0, 5).map((session) => ({ workoutTitle: session.workoutTitle, durationMinutes: session.durationMinutes, perceivedEffort: session.perceivedEffort, completedAt: session.completedAt })),
-      availableWorkouts: needsWorkoutCatalog ? (snapshot.workoutPlan?.days ?? []).slice(0, 4).map((day) => ({ title: day.title, focus: day.focus, durationMinutes: day.durationMinutes, exercises: day.exercises.slice(0, 8).map((exercise) => `${exercise.name}: ${exercise.sets} × ${exercise.repRange}`) })) : [],
+      nutritionTarget: snapshot.nutritionTarget
+        ? {
+            status: snapshot.nutritionTarget.status,
+            calories: snapshot.nutritionTarget.calories,
+            proteinG: snapshot.nutritionTarget.proteinG,
+            carbohydratesG: snapshot.nutritionTarget.carbohydratesG,
+            fatG: snapshot.nutritionTarget.fatG,
+          }
+        : undefined,
+      recentWorkouts: snapshot.workoutSessions.slice(0, 5).map((session) => ({
+        workoutTitle: session.workoutTitle,
+        durationMinutes: session.durationMinutes,
+        perceivedEffort: session.perceivedEffort,
+        completedAt: session.completedAt,
+      })),
+      availableWorkouts: needsWorkoutCatalog
+        ? (snapshot.workoutPlan?.days ?? []).slice(0, 4).map((day) => ({
+            title: day.title,
+            focus: day.focus,
+            durationMinutes: day.durationMinutes,
+            exercises: day.exercises.slice(0, 8).map((exercise) => `${exercise.name}: ${exercise.sets} × ${exercise.repRange}`),
+          }))
+        : [],
       todayNutrition,
-      weeklyNutrition: weeklyNutrition ? { consumed: weeklyNutrition.consumed, target: weeklyNutrition.target, balance: weeklyNutrition.balance } : undefined,
+      weeklyNutrition: weeklyNutrition
+        ? {
+            consumed: weeklyNutrition.consumed,
+            target: weeklyNutrition.target,
+            balance: weeklyNutrition.balance,
+          }
+        : undefined,
       weeklyWorkout,
-      weightTrend: latestWeight ? { latestKg: latestWeight.weightKg, previousKg: snapshot.weightEntries[1]?.weightKg ?? null } : undefined,
-      healthDocuments: needsHealthDocuments ? snapshot.healthDocuments.slice(0, 3).map(({ filename, uploadedAt, summary }) => ({ filename, uploadedAt, summary: summary.slice(0, 1200) })) : [],
+      weightTrend: latestWeight
+        ? {
+            latestKg: latestWeight.weightKg,
+            previousKg: snapshot.weightEntries[1]?.weightKg ?? null,
+          }
+        : undefined,
+      healthDocuments: needsHealthDocuments
+        ? snapshot.healthDocuments.slice(0, 3).map(({ filename, uploadedAt, summary }) => ({
+            filename,
+            uploadedAt,
+            summary: summary.slice(0, 1200),
+          }))
+        : [],
       healthSummary,
       sleepSummary: {
         latestMinutes: recentSleep[0]?.durationMinutes,
         averageMinutes7Days: recentSleep.length ? Math.round(recentSleep.reduce((sum, entry) => sum + entry.durationMinutes, 0) / recentSleep.length) : undefined,
-        recent: recentSleep.map(({ startedAt, endedAt, durationMinutes, quality, source }) => ({ startedAt, endedAt, durationMinutes, quality, source })),
+        recent: recentSleep.map(({ startedAt, endedAt, durationMinutes, quality, source }) => ({
+          startedAt,
+          endedAt,
+          durationMinutes,
+          quality,
+          source,
+        })),
       },
       mealPlanContext: needsPlan && currentMealPlan ? JSON.stringify(currentMealPlan) : undefined,
       planChangeTarget,
@@ -163,55 +252,115 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
   }, []);
 
   useIonViewDidEnter(() => {
-    void fetchCoachHistory(100).then((messages) => { if (messages.length) onMergeMessages(messages); }).catch(() => undefined);
-    window.requestAnimationFrame(() => { const element = conversationRef.current; if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'auto' }); });
+    void fetchCoachHistory(100)
+      .then((messages) => {
+        if (messages.length) onMergeMessages(messages);
+      })
+      .catch(() => undefined);
+    window.requestAnimationFrame(() => {
+      const element = conversationRef.current;
+      if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'auto' });
+    });
   });
-  useEffect(() => { const element = conversationRef.current; if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }); }, [snapshot.coachMessages.length, busy, pendingMeal, lastAction]);
+  useEffect(() => {
+    const element = conversationRef.current;
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+  }, [snapshot.coachMessages.length, busy, pendingMeal, lastAction]);
 
   const applyCoachAction = (action: CoachAction): { success: true; message: string } => {
     if (action.type === 'log_meal') {
       const id = onAddMeal({ ...action.meal, source: 'manual' });
       setLastAction({ kind: 'meal', id, label: action.meal.name });
-      return { success: true, message: english ? `${action.meal.name} was registered.` : `${action.meal.name} quedó registrada.` };
+      return {
+        success: true,
+        message: english ? `${action.meal.name} was registered.` : `${action.meal.name} quedó registrada.`,
+      };
     }
     if (action.type === 'log_workout') {
-      const id = onAddManualWorkout({ title: action.workout.title, activityType: action.workout.activityType, completedAt: action.workout.occurredAt, durationMinutes: action.workout.durationMinutes, caloriesBurned: action.workout.caloriesBurned, perceivedEffort: action.workout.perceivedEffort });
+      const id = onAddManualWorkout({
+        title: action.workout.title,
+        activityType: action.workout.activityType,
+        completedAt: action.workout.occurredAt,
+        durationMinutes: action.workout.durationMinutes,
+        caloriesBurned: action.workout.caloriesBurned,
+        perceivedEffort: action.workout.perceivedEffort,
+      });
       setLastAction({ kind: 'workout', id, label: action.workout.title });
-      return { success: true, message: english ? `${action.workout.title} was registered.` : `${action.workout.title} quedó registrada.` };
+      return {
+        success: true,
+        message: english ? `${action.workout.title} was registered.` : `${action.workout.title} quedó registrada.`,
+      };
     }
     if (action.type === 'log_sleep') {
       const id = onAddSleep({ ...action.sleep, source: 'vitacoach' });
       const label = `${Math.floor(action.sleep.durationMinutes / 60)} h ${action.sleep.durationMinutes % 60} min`;
       setLastAction({ kind: 'sleep', id, label });
-      return { success: true, message: english ? `${label} of sleep was registered.` : `Se registraron ${label} de sueño.` };
+      return {
+        success: true,
+        message: english ? `${label} of sleep was registered.` : `Se registraron ${label} de sueño.`,
+      };
     }
     if (action.type === 'replace_plan_meal') {
       onReplaceMealPlanOption(action.change.slotId, action.change.option);
-      setLastAction({ kind: 'plan', label: `${action.change.option.name} · plan y súper actualizados` });
-      return { success: true, message: english ? 'The meal plan and grocery list were updated.' : 'El plan y la lista del súper quedaron actualizados.' };
+      setLastAction({
+        kind: 'plan',
+        label: `${action.change.option.name} · plan y súper actualizados`,
+      });
+      return {
+        success: true,
+        message: english ? 'The meal plan and grocery list were updated.' : 'El plan y la lista del súper quedaron actualizados.',
+      };
     }
     onReplaceMealPlanIngredient(action.change.ingredientToReplace, action.change.replacementIngredient, action.change.slotId);
-    setLastAction({ kind: 'plan', label: `${action.change.ingredientToReplace} → ${action.change.replacementIngredient}` });
-    return { success: true, message: english ? 'The ingredient was replaced in the plan and grocery list.' : 'El ingrediente se sustituyó en el plan y la lista del súper.' };
+    setLastAction({
+      kind: 'plan',
+      label: `${action.change.ingredientToReplace} → ${action.change.replacementIngredient}`,
+    });
+    return {
+      success: true,
+      message: english ? 'The ingredient was replaced in the plan and grocery list.' : 'El ingrediente se sustituyó en el plan y la lista del súper.',
+    };
   };
 
-  const ask = async (content: string, options?: { appendUser?: boolean; history?: CoachChatMessage[]; attachment?: string | { filename: string; mimeType: 'application/pdf'; dataUrl: string } }): Promise<string | null> => {
+  const ask = async (
+    content: string,
+    options?: {
+      appendUser?: boolean;
+      history?: CoachChatMessage[];
+      attachment?: string | { filename: string; mimeType: 'application/pdf'; dataUrl: string };
+    },
+  ): Promise<string | null> => {
     if (!content.trim() || busy) return null;
-    setError(''); setBusy(true);
+    setError('');
+    setBusy(true);
     const appendUser = options?.appendUser ?? true;
-    const userMessage: CoachChatMessage = { id: createId(), role: 'user', content: content.trim(), createdAt: new Date().toISOString() };
+    const userMessage: CoachChatMessage = {
+      id: createId(),
+      role: 'user',
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
     const history = options?.history ?? snapshot.coachMessages;
     if (appendUser) onAppendMessages([userMessage]);
     try {
       const reply = await sendCoachMessage(context(content.trim()), history, content.trim(), options?.attachment, appendUser ? userMessage : undefined, snapshot.coachMemories);
       if (reply.action) applyCoachAction(reply.action);
-      onAppendMessages([reply.assistantMessage ?? { id: createId(), role: 'assistant', content: reply.response, createdAt: new Date().toISOString() }]);
+      onAppendMessages([
+        reply.assistantMessage ?? {
+          id: createId(),
+          role: 'assistant',
+          content: reply.response,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
       onApplyMemoryUpdates(reply.memoryUpdates ?? []);
       return reply.response;
     } catch (unknownError) {
-      setError(unknownError instanceof Error ? unknownError.message : (english ? 'Could not contact VITACOACH.' : 'No fue posible contactar a VITACOACH.'));
+      setError(unknownError instanceof Error ? unknownError.message : english ? 'Could not contact VITACOACH.' : 'No fue posible contactar a VITACOACH.');
       return null;
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (event?: FormEvent, suggestion?: string) => {
@@ -224,8 +373,15 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
 
   const processPhoto = async (preview: string) => {
     if (preview.length > 7_500_000) return setError('La imagen debe pesar menos de 5.5 MB.');
-    const photoMessage: CoachChatMessage = { id: createId(), role: 'user', content: '📷 Foto de alimento enviada', createdAt: new Date().toISOString() };
-    onAppendMessages([photoMessage]); setBusy(true); setError('');
+    const photoMessage: CoachChatMessage = {
+      id: createId(),
+      role: 'user',
+      content: '📷 Foto de alimento enviada',
+      createdAt: new Date().toISOString(),
+    };
+    onAppendMessages([photoMessage]);
+    setBusy(true);
+    setError('');
     try {
       const analysis = await analyzeFoodPhoto(preview, uiLocale);
       const mealType = inferMealType();
@@ -233,11 +389,20 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       setPendingMeal({ preview, analysis, name, mealType });
       const prompt = `El usuario acaba de enviar una foto de su alimento. La estimación visual (aún no confirmada) es: ${JSON.stringify({ name, mealType, totals: analysis.totals, confidence: analysis.overallConfidence, notes: analysis.notes })}. Dale retroalimentación breve y útil sobre cómo encaja con sus metas de hoy. Menciona que debe confirmar el registro y evita presentar la estimación como exacta.`;
       const reply = await sendCoachMessage(context(prompt), snapshot.coachMessages, prompt, undefined, photoMessage, snapshot.coachMemories);
-      onAppendMessages([reply.assistantMessage ?? { id: createId(), role: 'assistant', content: reply.response, createdAt: new Date().toISOString() }]);
+      onAppendMessages([
+        reply.assistantMessage ?? {
+          id: createId(),
+          role: 'assistant',
+          content: reply.response,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
       onApplyMemoryUpdates(reply.memoryUpdates ?? []);
     } catch (unknownError) {
       setError(unknownError instanceof Error ? unknownError.message : 'No pudimos analizar la foto.');
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handlePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -251,16 +416,31 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
 
   const handleNativePhoto = async (source: NativePhotoSource) => {
     setError('');
-    try { const preview = await pickNativePhoto(source); if (preview) await processPhoto(preview); }
-    catch (unknownError) {
+    try {
+      const preview = await pickNativePhoto(source);
+      if (preview) await processPhoto(preview);
+    } catch (unknownError) {
       if (!String(unknownError).toLocaleLowerCase('es-MX').includes('cancel')) setError(unknownError instanceof Error ? unknownError.message : 'No pudimos abrir la cámara.');
     }
   };
 
   const confirmMeal = () => {
     if (!pendingMeal) return;
-    onAddMeal({ name: pendingMeal.name, occurredAt: new Date().toISOString(), mealType: pendingMeal.mealType, ...pendingMeal.analysis.totals, source: 'photo' });
-    onAppendMessages([{ id: createId(), role: 'assistant', content: `${MEAL_LABELS[pendingMeal.mealType]} registrada. La tomaré en cuenta para las recomendaciones del resto del día.`, createdAt: new Date().toISOString() }]);
+    onAddMeal({
+      name: pendingMeal.name,
+      occurredAt: new Date().toISOString(),
+      mealType: pendingMeal.mealType,
+      ...pendingMeal.analysis.totals,
+      source: 'photo',
+    });
+    onAppendMessages([
+      {
+        id: createId(),
+        role: 'assistant',
+        content: `${MEAL_LABELS[pendingMeal.mealType]} registrada. La tomaré en cuenta para las recomendaciones del resto del día.`,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
     setPendingMeal(null);
   };
 
@@ -270,34 +450,286 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     if (!file) return;
     if (file.type !== 'application/pdf') return setError('Por ahora VITACOACH acepta estudios en PDF.');
     if (file.size > 8_000_000) return setError('El PDF debe pesar menos de 8 MB.');
-    const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('No pudimos leer el PDF.')); reader.readAsDataURL(file); });
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('No pudimos leer el PDF.'));
+      reader.readAsDataURL(file);
+    });
     const message = `📄 Revisa mi documento de salud “${file.name}”. Resume los hallazgos medidos, señala qué valores aparecen fuera del rango del propio laboratorio y explícame qué conviene conversar con un profesional. No hagas un diagnóstico.`;
-    const reply = await ask(message, { history: snapshot.coachMessages, attachment: { filename: file.name, mimeType: 'application/pdf', dataUrl } });
-    if (reply) onAddHealthDocument({ filename: file.name, mimeType: file.type, summary: reply });
+    const reply = await ask(message, {
+      history: snapshot.coachMessages,
+      attachment: { filename: file.name, mimeType: 'application/pdf', dataUrl },
+    });
+    if (reply)
+      onAddHealthDocument({
+        filename: file.name,
+        mimeType: file.type,
+        summary: reply,
+      });
   };
 
-  const composer = <div className="coach-footer"><div className="suggestion-grid">{suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={busy} onClick={() => void submit(undefined, suggestion)}>{suggestion}</button>)}</div>
-    {error && <p className="form-error" role="alert">{error}</p>}
-    <form className="coach-composer" onSubmit={(event) => void submit(event)}><button type="button" className="coach-tool-button" disabled={busy} aria-label="Añadir foto" onClick={() => setPhotoPickerOpen(true)}><IonIcon icon={cameraOutline} /></button><input ref={photoCameraRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void handlePhoto(event)} /><input ref={photoAlbumRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handlePhoto(event)} /><input ref={photoFileRef} className="sr-only" type="file" accept="image/*" onChange={(event) => void handlePhoto(event)} /><button type="button" className="coach-tool-button coach-document-button" disabled={busy} aria-label="Adjuntar estudios en PDF" onClick={() => documentRef.current?.click()}><IonIcon icon={documentAttachOutline} /></button><input ref={documentRef} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void handleHealthDocument(event)} /><label htmlFor="coach-message" className="sr-only">{english ? 'Message VITACOACH' : 'Mensaje para VITACOACH'}</label><textarea id="coach-message" rows={2} maxLength={1500} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={english ? 'Message VITACOACH…' : 'Escríbele a VITACOACH…'} disabled={busy} onFocus={() => window.requestAnimationFrame(() => conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'auto' }))} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} /><button type="button" className="coach-tool-button" disabled={busy} aria-label="Hablar por voz" onClick={(event) => { event.currentTarget.blur(); setVoiceOpen(true); }}><IonIcon icon={micOutline} /></button><button type="submit" disabled={busy || !draft.trim()} aria-label={english ? 'Send message' : 'Enviar mensaje'}><IonIcon icon={paperPlaneOutline} /></button></form></div>;
+  const composer = (
+    <div className="coach-footer">
+      <div className="suggestion-grid">
+        {suggestions.map((suggestion) => (
+          <button key={suggestion} type="button" disabled={busy} onClick={() => void submit(undefined, suggestion)}>
+            {suggestion}
+          </button>
+        ))}
+      </div>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <form className="coach-composer" onSubmit={(event) => void submit(event)}>
+        <button type="button" className="coach-tool-button" disabled={busy} aria-label="Añadir foto" onClick={() => setPhotoPickerOpen(true)}>
+          <IonIcon icon={cameraOutline} />
+        </button>
+        <input ref={photoCameraRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void handlePhoto(event)} />
+        <input ref={photoAlbumRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handlePhoto(event)} />
+        <input ref={photoFileRef} className="sr-only" type="file" accept="image/*" onChange={(event) => void handlePhoto(event)} />
+        <button type="button" className="coach-tool-button coach-document-button" disabled={busy} aria-label="Adjuntar estudios en PDF" onClick={() => documentRef.current?.click()}>
+          <IonIcon icon={documentAttachOutline} />
+        </button>
+        <input ref={documentRef} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void handleHealthDocument(event)} />
+        <label htmlFor="coach-message" className="sr-only">
+          {english ? 'Message VITACOACH' : 'Mensaje para VITACOACH'}
+        </label>
+        <textarea
+          id="coach-message"
+          rows={2}
+          maxLength={1500}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={english ? 'Message VITACOACH…' : 'Escríbele a VITACOACH…'}
+          disabled={busy}
+          onFocus={() =>
+            window.requestAnimationFrame(() =>
+              conversationRef.current?.scrollTo({
+                top: conversationRef.current.scrollHeight,
+                behavior: 'auto',
+              }),
+            )
+          }
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="coach-tool-button"
+          disabled={busy}
+          aria-label="Hablar por voz"
+          onClick={(event) => {
+            event.currentTarget.blur();
+            openVoice();
+          }}
+        >
+          <IonIcon icon={micOutline} />
+        </button>
+        <button type="submit" disabled={busy || !draft.trim()} aria-label={english ? 'Send message' : 'Enviar mensaje'}>
+          <IonIcon icon={paperPlaneOutline} />
+        </button>
+      </form>
+    </div>
+  );
 
-  return <IonPage className={`app-page coach-page${isNativeIos ? ' native-coach-page' : ''}`}><IonContent scrollY={false}><main className="page-shell coach-shell vitacoach-shell">
-    <header className="app-header"><BrandMark compact /><button className="voice-call-button" onClick={(event) => { event.currentTarget.blur(); setVoiceOpen(true); }}><IonIcon icon={callOutline} /><span>{english ? 'Call' : 'Llamar'}</span></button></header>
-    <section className="coach-heading"><span><IonIcon icon={sparklesOutline} /></span><div><p className="eyebrow coach-memory-status"><span>VITACOACH</span><span title="Puedes pedirme que recuerde, corrija u olvide algo"><IonIcon icon={shieldCheckmarkOutline} /> Memoria activa</span></p><h1>{english ? `I'm with you, ${profile.preferredName}` : `Estoy contigo, ${profile.preferredName}`}</h1><p>{english ? 'Chat freely, send a meal photo, or start a voice conversation.' : 'Habla libremente, envía una foto de tu comida o inicia una conversación por voz.'}</p></div></section>
-    <section ref={conversationRef} className="coach-conversation" aria-live="polite">
-      {snapshot.coachMessages.length === 0 && <div className="chat-bubble chat-bubble--coach"><IonIcon icon={chatbubbleEllipsesOutline} /><p>{english ? 'I am VITACOACH. I use your goals, workouts, meals and preferences to coach you with context. Tell me what is really going on today.' : 'Soy VITACOACH. Uso tus metas, entrenamientos, comidas y preferencias para acompañarte con contexto. Cuéntame cómo va tu día de verdad.'}</p></div>}
-      {snapshot.coachMessages.map((message) => <article key={message.id} className={`coach-message coach-message--${message.role}`}><span>{message.role === 'assistant' ? 'VC' : profile.preferredName.slice(0, 1).toUpperCase()}</span><div><small>{message.role === 'assistant' ? 'VITACOACH' : (english ? 'You' : 'Tú')}</small><p>{message.content}</p></div></article>)}
-      {pendingMeal && <article className="coach-food-confirmation"><img src={pendingMeal.preview} alt="Alimento analizado" /><div><small>Estimación visual · {Math.round(pendingMeal.analysis.overallConfidence * 100)}% confianza</small><label className="field"><span>Alimento</span><input value={pendingMeal.name} onChange={(event) => setPendingMeal({ ...pendingMeal, name: event.target.value })} /></label><label className="field"><span>Momento detectado por la hora</span><select value={pendingMeal.mealType} onChange={(event) => setPendingMeal({ ...pendingMeal, mealType: event.target.value as MealType })}>{Object.entries(MEAL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><p><strong>{pendingMeal.analysis.totals.calories} kcal</strong> · {pendingMeal.analysis.totals.proteinG}g P · {pendingMeal.analysis.totals.carbohydratesG}g C · {pendingMeal.analysis.totals.fatG}g G</p><div><IonButton size="small" className="primary-button" onClick={confirmMeal}>Confirmar y registrar</IonButton><IonButton size="small" fill="clear" color="medium" onClick={() => setPendingMeal(null)}>Descartar</IonButton></div></div></article>}
-      {busy && <article className="coach-message coach-message--assistant"><span>VC</span><div><small>VITACOACH</small><p className="coach-thinking"><IonSpinner name="dots" /> {english ? 'Thinking…' : 'Pensando…'}</p></div></article>}
-      {lastAction && <article className="coach-action-confirmed"><IonIcon icon={checkmarkCircleOutline} /><div><strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : lastAction.kind === 'sleep' ? 'Sueño registrado' : 'Plan alimenticio actualizado'}</strong><span>{lastAction.label}</span></div>{lastAction.kind !== 'plan' && lastAction.id && <button onClick={() => { if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!); else if (lastAction.kind === 'workout') onDeleteWorkout(lastAction.id!); else onDeleteSleep(lastAction.id!); setLastAction(null); }}>Deshacer</button>}</article>}
-      <div ref={endRef} />
-    </section>
-  </main></IonContent><IonFooter className="coach-input-footer">{composer}</IonFooter><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={() => context('', true)} onClose={() => setVoiceOpen(false)} onAction={applyCoachAction} onEnded={(event) => {
-    void recordCoachCall({ locale: uiLocale, ...event }).catch(() => undefined);
-  }} /></IonPage>;
+  return (
+    <IonPage className={`app-page coach-page${isNativeIos ? ' native-coach-page' : ''}`}>
+      <IonContent scrollY={false}>
+        <main className="page-shell coach-shell vitacoach-shell">
+          <header className="app-header">
+            <BrandMark compact />
+            <button
+              className="voice-call-button"
+              onClick={(event) => {
+                event.currentTarget.blur();
+                openVoice();
+              }}
+            >
+              <IonIcon icon={callOutline} />
+              <span>
+                {english ? 'Call' : 'Llamar'}
+                {voiceBalance && <small>{formatCallDuration(voiceBalance.totalRemainingSeconds)}</small>}
+              </span>
+            </button>
+          </header>
+          <section className="coach-heading">
+            <span>
+              <IonIcon icon={sparklesOutline} />
+            </span>
+            <div>
+              <p className="eyebrow coach-memory-status">
+                <span>VITACOACH</span>
+                <span title="Puedes pedirme que recuerde, corrija u olvide algo">
+                  <IonIcon icon={shieldCheckmarkOutline} /> Memoria activa
+                </span>
+              </p>
+              <h1>{english ? `I'm with you, ${profile.preferredName}` : `Estoy contigo, ${profile.preferredName}`}</h1>
+              <p>{english ? 'Chat freely, send a meal photo, or start a voice conversation.' : 'Habla libremente, envía una foto de tu comida o inicia una conversación por voz.'}</p>
+            </div>
+          </section>
+          <section ref={conversationRef} className="coach-conversation" aria-live="polite">
+            {snapshot.coachMessages.length === 0 && (
+              <div className="chat-bubble chat-bubble--coach">
+                <IonIcon icon={chatbubbleEllipsesOutline} />
+                <p>{english ? 'I am VITACOACH. I use your goals, workouts, meals and preferences to coach you with context. Tell me what is really going on today.' : 'Soy VITACOACH. Uso tus metas, entrenamientos, comidas y preferencias para acompañarte con contexto. Cuéntame cómo va tu día de verdad.'}</p>
+              </div>
+            )}
+            {snapshot.coachMessages.map((message) => (
+              <article key={message.id} className={`coach-message coach-message--${message.role}`}>
+                <span>{message.role === 'assistant' ? 'VC' : profile.preferredName.slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <small>{message.role === 'assistant' ? 'VITACOACH' : english ? 'You' : 'Tú'}</small>
+                  <p>{message.content}</p>
+                </div>
+              </article>
+            ))}
+            {pendingMeal && (
+              <article className="coach-food-confirmation">
+                <img src={pendingMeal.preview} alt="Alimento analizado" />
+                <div>
+                  <small>Estimación visual · {Math.round(pendingMeal.analysis.overallConfidence * 100)}% confianza</small>
+                  <label className="field">
+                    <span>Alimento</span>
+                    <input
+                      value={pendingMeal.name}
+                      onChange={(event) =>
+                        setPendingMeal({
+                          ...pendingMeal,
+                          name: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Momento detectado por la hora</span>
+                    <select
+                      value={pendingMeal.mealType}
+                      onChange={(event) =>
+                        setPendingMeal({
+                          ...pendingMeal,
+                          mealType: event.target.value as MealType,
+                        })
+                      }
+                    >
+                      {Object.entries(MEAL_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p>
+                    <strong>{pendingMeal.analysis.totals.calories} kcal</strong> · {pendingMeal.analysis.totals.proteinG}g P · {pendingMeal.analysis.totals.carbohydratesG}g C · {pendingMeal.analysis.totals.fatG}g G
+                  </p>
+                  <div>
+                    <IonButton size="small" className="primary-button" onClick={confirmMeal}>
+                      Confirmar y registrar
+                    </IonButton>
+                    <IonButton size="small" fill="clear" color="medium" onClick={() => setPendingMeal(null)}>
+                      Descartar
+                    </IonButton>
+                  </div>
+                </div>
+              </article>
+            )}
+            {busy && (
+              <article className="coach-message coach-message--assistant">
+                <span>VC</span>
+                <div>
+                  <small>VITACOACH</small>
+                  <p className="coach-thinking">
+                    <IonSpinner name="dots" /> {english ? 'Thinking…' : 'Pensando…'}
+                  </p>
+                </div>
+              </article>
+            )}
+            {lastAction && (
+              <article className="coach-action-confirmed">
+                <IonIcon icon={checkmarkCircleOutline} />
+                <div>
+                  <strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : lastAction.kind === 'sleep' ? 'Sueño registrado' : 'Plan alimenticio actualizado'}</strong>
+                  <span>{lastAction.label}</span>
+                </div>
+                {lastAction.kind !== 'plan' && lastAction.id && (
+                  <button
+                    onClick={() => {
+                      if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!);
+                      else if (lastAction.kind === 'workout') onDeleteWorkout(lastAction.id!);
+                      else onDeleteSleep(lastAction.id!);
+                      setLastAction(null);
+                    }}
+                  >
+                    Deshacer
+                  </button>
+                )}
+              </article>
+            )}
+            <div ref={endRef} />
+          </section>
+        </main>
+      </IonContent>
+      <IonFooter className="coach-input-footer">{composer}</IonFooter>
+      <IonActionSheet
+        isOpen={photoPickerOpen}
+        onDidDismiss={() => setPhotoPickerOpen(false)}
+        header="Añadir foto de alimento"
+        buttons={[
+          {
+            text: 'Tomar foto',
+            icon: cameraOutline,
+            handler: () => {
+              if (isNativeIos) void handleNativePhoto('camera');
+              else photoCameraRef.current?.click();
+            },
+          },
+          {
+            text: 'Elegir del álbum',
+            icon: imagesOutline,
+            handler: () => {
+              if (isNativeIos) void handleNativePhoto('photos');
+              else photoAlbumRef.current?.click();
+            },
+          },
+          {
+            text: 'Elegir archivo',
+            icon: folderOpenOutline,
+            handler: () => photoFileRef.current?.click(),
+          },
+          { text: 'Cancelar', role: 'cancel' },
+        ]}
+      />
+      <VoiceCall
+        open={voiceOpen}
+        english={english}
+        getContext={() => context('', true)}
+        onClose={() => setVoiceOpen(false)}
+        onExhausted={() => {
+          setVoiceOpen(false);
+          setVoiceCatalogOpen(true);
+        }}
+        onAction={applyCoachAction}
+        onEnded={async (event) => {
+          const result = await recordCoachCall({ locale: uiLocale, ...event });
+          onVoiceBalance(result.voiceBalance);
+          if (result.voiceBalance.totalRemainingSeconds <= 0) setVoiceCatalogOpen(true);
+        }}
+      />
+      <VoiceCreditsModal isOpen={voiceCatalogOpen} balance={voiceBalance} offers={voiceOffers} busy={billingBusy} message={billingMessage} onDismiss={() => setVoiceCatalogOpen(false)} onPurchase={onPurchaseVoice} />
+    </IonPage>
+  );
 };
 
 function formatCallDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
   return `${minutes}:${seconds}`;
 }
@@ -365,7 +797,10 @@ function realtimeDate(value: unknown): string {
 
 function realtimeStringArray(value: unknown, field: string, maxItems: number): string[] {
   if (!Array.isArray(value)) throw new Error(`Falta ${field}`);
-  const items = value.map((item) => typeof item === 'string' ? item.trim().slice(0, 400) : '').filter(Boolean).slice(0, maxItems);
+  const items = value
+    .map((item) => (typeof item === 'string' ? item.trim().slice(0, 400) : ''))
+    .filter(Boolean)
+    .slice(0, maxItems);
   if (!items.length) throw new Error(`Falta ${field}`);
   return items;
 }
@@ -407,10 +842,16 @@ function realtimeToolAction(name: string, rawArguments: string): CoachAction {
     const startedAt = realtimeDate(args.startedAt);
     const endedAt = realtimeDate(args.endedAt);
     const durationMinutes = Math.round(realtimeNumber(args.durationMinutes, 'durationMinutes', 30, 1_440));
-    const quality = typeof args.quality === 'number' ? Math.round(realtimeNumber(args.quality, 'quality', 1, 5)) as SleepEntry['quality'] : undefined;
+    const quality = typeof args.quality === 'number' ? (Math.round(realtimeNumber(args.quality, 'quality', 1, 5)) as SleepEntry['quality']) : undefined;
     return {
       type: 'log_sleep',
-      sleep: { startedAt, endedAt, durationMinutes, quality, note: typeof args.note === 'string' ? args.note.trim().slice(0, 300) : undefined },
+      sleep: {
+        startedAt,
+        endedAt,
+        durationMinutes,
+        quality,
+        note: typeof args.note === 'string' ? args.note.trim().slice(0, 300) : undefined,
+      },
     };
   }
   if (name === 'replace_plan_meal') {
@@ -452,15 +893,15 @@ function realtimeToolAction(name: string, rawArguments: string): CoachAction {
   throw new Error('Acción no autorizada');
 }
 
-function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { open: boolean; english: boolean; getContext(): CoachChatContext; onClose(): void; onAction(action: CoachAction): { success: true; message: string } | Promise<{ success: true; message: string }>; onEnded(event: { durationSeconds: number; startedAt: string; endedAt: string; usage: RealtimeCallUsage }): void | Promise<void> }) {
-  const connectionFailureMessage = english
-    ? 'The call could not connect with VITACOACH. Try again.'
-    : 'No se logró enlazar la llamada con VITACOACH. Intentalo de nuevo';
+function VoiceCall({ open, english, getContext, onClose, onExhausted, onAction, onEnded }: { open: boolean; english: boolean; getContext(): CoachChatContext; onClose(): void; onExhausted(): void; onAction(action: CoachAction): { success: true; message: string } | Promise<{ success: true; message: string }>; onEnded(event: { callSessionId: string; durationSeconds: number; startedAt: string; endedAt: string; usage: RealtimeCallUsage }): void | Promise<void> }) {
+  const connectionFailureMessage = english ? 'The call could not connect with VITACOACH. Try again.' : 'No se logró enlazar la llamada con VITACOACH. Intentalo de nuevo';
   const [listening, setListening] = useState(false);
   const [callActive, setCallActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [meteringStarted, setMeteringStarted] = useState(false);
+  const [maxDurationSeconds, setMaxDurationSeconds] = useState(0);
   const [connectionError, setConnectionError] = useState(false);
   const [requiresSecureContext, setRequiresSecureContext] = useState(false);
   const [status, setStatus] = useState(english ? 'Connecting with VITACOACH…' : 'Conectando con VITACOACH…');
@@ -474,18 +915,31 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
   const completedToolCallsRef = useRef(new Set<string>());
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const startedAtRef = useRef<string | null>(null);
+  const reservationAtRef = useRef<string | null>(null);
+  const callSessionIdRef = useRef<string | null>(null);
+  const meteringStartedRef = useRef(false);
   const finalizedRef = useRef(false);
   const greetingSentRef = useRef(false);
   const usageRef = useRef<RealtimeCallUsage>(emptyRealtimeUsage());
 
   useEffect(() => {
-    if (!callActive) { setCallSeconds(0); return; }
-    const startedAt = Date.now();
+    if (!meteringStarted) {
+      setCallSeconds(0);
+      return;
+    }
+    const startedAt = startedAtRef.current ? Date.parse(startedAtRef.current) : Date.now();
     const tick = () => setCallSeconds(Math.floor((Date.now() - startedAt) / 1000));
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [callActive]);
+  }, [meteringStarted]);
+
+  useEffect(() => {
+    if (!meteringStarted || !callSessionIdRef.current) return;
+    const sessionId = callSessionIdRef.current;
+    const timer = window.setInterval(() => void heartbeatCoachCall(sessionId), 15_000);
+    return () => window.clearInterval(timer);
+  }, [meteringStarted]);
 
   const playConnectionTone = () => {
     const AudioContextConstructor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -497,21 +951,36 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
         const oscillator = audioContext.createOscillator();
         const gain = audioContext.createGain();
         const startsAt = now + index * 0.11;
-        oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, startsAt);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(frequency, startsAt);
         gain.gain.setValueAtTime(0.0001, startsAt);
         gain.gain.exponentialRampToValueAtTime(0.045, startsAt + 0.018);
         gain.gain.exponentialRampToValueAtTime(0.0001, startsAt + 0.085);
-        oscillator.connect(gain); gain.connect(audioContext.destination);
-        oscillator.start(startsAt); oscillator.stop(startsAt + 0.09);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(startsAt);
+        oscillator.stop(startsAt + 0.09);
       });
       window.setTimeout(() => void audioContext.close(), 650);
-    } catch { /* El tono es decorativo; la llamada continúa si el navegador lo bloquea. */ }
+    } catch (error) {
+      if ((error as Error & { code?: string })?.code === 'VOICE_CREDITS_EXHAUSTED') {
+        stopTransport();
+        onExhausted();
+        return;
+      }
+      /* El tono es decorativo; la llamada continúa si el navegador lo bloquea. */
+    }
   };
 
   const startCall = async () => {
     if (activeRef.current) return;
     activeRef.current = true;
-    startedAtRef.current = new Date().toISOString();
+    startedAtRef.current = null;
+    reservationAtRef.current = new Date().toISOString();
+    callSessionIdRef.current = null;
+    meteringStartedRef.current = false;
+    setMeteringStarted(false);
+    setMaxDurationSeconds(0);
     finalizedRef.current = false;
     completedToolCallsRef.current.clear();
     greetingSentRef.current = false;
@@ -534,10 +1003,15 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
     try {
       const callContext = getContext();
       const secret = await fetchRealtimeToken(callContext);
+      callSessionIdRef.current = secret.callSessionId;
+      setMaxDurationSeconds(secret.maxDurationSeconds);
       if (!secret.value) throw new Error('Token efímero vacío');
       const configuredVoice = secret.session?.audio?.output?.voice;
       if (configuredVoice && configuredVoice !== 'marin') throw new Error(`Voz inesperada: ${configuredVoice}`);
-      if (!activeRef.current) return;
+      if (!activeRef.current) {
+        await finishReservation();
+        return;
+      }
       const peer = new RTCPeerConnection();
       peerRef.current = peer;
       const audio = audioRef.current;
@@ -553,8 +1027,18 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
           setStatus(connectionFailureMessage);
         });
       };
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      if (!activeRef.current) { stream.getTracks().forEach((track) => track.stop()); peer.close(); return; }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      if (!activeRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        peer.close();
+        return;
+      }
       streamRef.current = stream;
       for (const track of stream.getTracks()) peer.addTrack(track, stream);
       const channel = peer.createDataChannel('oai-events');
@@ -568,18 +1052,18 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
         setSpeaking(true);
         setStatus(english ? 'VITACOACH is answering…' : 'VITACOACH está contestando…');
         const preferredName = callContext.profile.preferredName.trim().slice(0, 60);
-        const greeting = english
-          ? `Hi ${preferredName || 'there'}, how can I help you today?`
-          : `${preferredName ? `Hola ${preferredName}` : 'Hola'}, ¿en qué te puedo ayudar hoy?`;
-        channel.send(JSON.stringify({
-          type: 'response.create',
-          response: {
-            output_modalities: ['audio'],
-            max_output_tokens: 100,
-            instructions: `This is the opening of the call. Say exactly this greeting, naturally and warmly, with no extra words: ${JSON.stringify(greeting)}`,
-            metadata: { vitamate_event: 'call_greeting', voice: 'marin' },
-          },
-        }));
+        const greeting = english ? `Hi ${preferredName || 'there'}, how can I help you today?` : `${preferredName ? `Hola ${preferredName}` : 'Hola'}, ¿en qué te puedo ayudar hoy?`;
+        channel.send(
+          JSON.stringify({
+            type: 'response.create',
+            response: {
+              output_modalities: ['audio'],
+              max_output_tokens: 100,
+              instructions: `This is the opening of the call. Say exactly this greeting, naturally and warmly, with no extra words: ${JSON.stringify(greeting)}`,
+              metadata: { vitamate_event: 'call_greeting', voice: 'marin' },
+            },
+          }),
+        );
       };
       channel.onerror = () => {
         if (!activeRef.current) return;
@@ -598,13 +1082,22 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
           const action = realtimeToolAction(name, rawArguments);
           output = await onAction(action);
         } catch (error) {
-          output = { success: false, message: error instanceof Error ? error.message : (english ? 'The request could not be applied.' : 'No se pudo aplicar la solicitud.') };
+          output = {
+            success: false,
+            message: error instanceof Error ? error.message : english ? 'The request could not be applied.' : 'No se pudo aplicar la solicitud.',
+          };
         }
         if (!channelRef.current || channelRef.current.readyState !== 'open') return;
-        channelRef.current.send(JSON.stringify({
-          type: 'conversation.item.create',
-          item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
-        }));
+        channelRef.current.send(
+          JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: callId,
+              output: JSON.stringify(output),
+            },
+          }),
+        );
         channelRef.current.send(JSON.stringify({ type: 'response.create' }));
       };
       channel.onmessage = (event) => {
@@ -615,7 +1108,12 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
             session?: { audio?: { output?: { voice?: string } } };
             response?: {
               usage?: RealtimeResponseUsage;
-              output?: Array<{ type?: string; name?: string; call_id?: string; arguments?: string }>;
+              output?: Array<{
+                type?: string;
+                name?: string;
+                call_id?: string;
+                arguments?: string;
+              }>;
             };
           };
           if (payload.type === 'error') {
@@ -632,6 +1130,15 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
             }
           }
           if (payload.type === 'input_audio_buffer.speech_started') {
+            if (!meteringStartedRef.current && callSessionIdRef.current) {
+              meteringStartedRef.current = true;
+              startedAtRef.current = new Date().toISOString();
+              setMeteringStarted(true);
+              void startCoachCall(callSessionIdRef.current).catch(() => {
+                setConnectionError(true);
+                setStatus(connectionFailureMessage);
+              });
+            }
             setListening(true);
             setSpeaking(false);
             speakingRef.current = false;
@@ -656,10 +1163,12 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
               speakingRef.current = false;
               setSpeaking(false);
               setListening(!mutedRef.current);
-              setStatus(mutedRef.current ? (english ? 'Microphone muted' : 'Micrófono silenciado') : (english ? 'Listening…' : 'Escuchando…'));
+              setStatus(mutedRef.current ? (english ? 'Microphone muted' : 'Micrófono silenciado') : english ? 'Listening…' : 'Escuchando…');
             }
           }
-        } catch { /* Ignore non-JSON transport events. */ }
+        } catch {
+          /* Ignore non-JSON transport events. */
+        }
       };
       peer.onconnectionstatechange = () => {
         if (peer.connectionState === 'connected') setConnectionError(false);
@@ -670,10 +1179,20 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
       };
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      const response = await fetch('https://api.openai.com/v1/realtime/calls', { method: 'POST', headers: { Authorization: `Bearer ${secret.value}`, 'Content-Type': 'application/sdp' }, body: offer.sdp });
+      const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${secret.value}`,
+          'Content-Type': 'application/sdp',
+        },
+        body: offer.sdp,
+      });
       if (!response.ok) throw new Error(`Realtime ${response.status}`);
       const answerSdp = await response.text();
-      if (!activeRef.current) { peer.close(); return; }
+      if (!activeRef.current) {
+        peer.close();
+        return;
+      }
       await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     } catch {
       if (!activeRef.current) return;
@@ -691,41 +1210,120 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
   const toggleMute = () => {
     if (!callActive) return;
     const nextMuted = !mutedRef.current;
-    mutedRef.current = nextMuted; setMuted(nextMuted);
-    streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
+    mutedRef.current = nextMuted;
+    setMuted(nextMuted);
+    streamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
     if (nextMuted) {
-      setListening(false); setStatus(english ? 'Microphone muted' : 'Micrófono silenciado');
+      setListening(false);
+      setStatus(english ? 'Microphone muted' : 'Micrófono silenciado');
     } else {
       setListening(!speakingRef.current);
-      setStatus(speakingRef.current ? (english ? 'VITACOACH is speaking…' : 'VITACOACH está respondiendo…') : (english ? 'Listening…' : 'Escuchando…'));
+      setStatus(speakingRef.current ? (english ? 'VITACOACH is speaking…' : 'VITACOACH está respondiendo…') : english ? 'Listening…' : 'Escuchando…');
     }
   };
-  const stop = () => {
-    activeRef.current = false; speakingRef.current = false; mutedRef.current = false;
-    peerRef.current?.close(); channelRef.current?.close();
+  function stopTransport() {
+    activeRef.current = false;
+    speakingRef.current = false;
+    mutedRef.current = false;
+    peerRef.current?.close();
+    channelRef.current?.close();
     streamRef.current?.getTracks().forEach((track) => track.stop());
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.srcObject = null; }
-    peerRef.current = null; channelRef.current = null; streamRef.current = null;
-    setListening(false); setSpeaking(false); setMuted(false); setCallActive(false); setConnectionError(false);
-  };
-  const retry = () => {
-    stop();
-    setRequiresSecureContext(false);
-    window.setTimeout(() => void startCall(), 120);
-  };
-  const close = () => {
-    if (!finalizedRef.current && startedAtRef.current) {
-      finalizedRef.current = true;
-      const endedAt = new Date().toISOString();
-      const durationSeconds = Math.max(callSeconds, Math.floor((new Date(endedAt).getTime() - new Date(startedAtRef.current).getTime()) / 1000));
-      if (durationSeconds > 0 || usageRef.current.responses > 0) {
-        void onEnded({ durationSeconds, startedAt: startedAtRef.current, endedAt, usage: usageRef.current });
-      }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.srcObject = null;
     }
-    stop(); onClose();
+    peerRef.current = null;
+    channelRef.current = null;
+    streamRef.current = null;
+    setListening(false);
+    setSpeaking(false);
+    setMuted(false);
+    setCallActive(false);
+    setMeteringStarted(false);
+    setConnectionError(false);
+  }
+  async function finishReservation() {
+    const callSessionId = callSessionIdRef.current;
+    if (finalizedRef.current || !callSessionId) return;
+    finalizedRef.current = true;
+    const endedAt = new Date().toISOString();
+    await onEnded({
+      callSessionId,
+      durationSeconds: callSeconds,
+      startedAt: startedAtRef.current ?? reservationAtRef.current ?? endedAt,
+      endedAt,
+      usage: usageRef.current,
+    });
+  }
+  const retry = () => {
+    void finishReservation().finally(() => {
+      stopTransport();
+      setRequiresSecureContext(false);
+      window.setTimeout(() => void startCall(), 120);
+    });
   };
+  function close() {
+    void finishReservation().catch(() => undefined);
+    stopTransport();
+    onClose();
+  }
+  useEffect(() => {
+    if (meteringStarted && maxDurationSeconds > 0 && callSeconds >= maxDurationSeconds) close();
+  }, [callSeconds, maxDurationSeconds, meteringStarted]);
   const activityStatus = muted ? (english ? 'Microphone muted' : 'Micrófono silenciado') : status;
-  return <IonModal isOpen={open} onWillPresent={() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); }} onDidPresent={() => { closeButtonRef.current?.focus(); void startCall(); }} onDidDismiss={close} className="voice-call-modal"><div className="voice-call"><audio ref={audioRef} className="voice-remote-audio" autoPlay playsInline aria-hidden="true" onPlaying={() => { if (!activeRef.current) return; setConnectionError(false); setRequiresSecureContext(false); }} /><button ref={closeButtonRef} className="voice-close" aria-label={english ? 'End call' : 'Finalizar llamada'} onClick={close}><IonIcon icon={closeOutline} /></button><div className={`voice-orb${speaking ? ' is-speaking' : listening ? ' is-listening' : callActive ? ' is-connecting' : ''}`}><span>VC</span></div><p className="eyebrow">VITACOACH</p><h2>{english ? 'Voice call' : 'Llamada de voz'}</h2><p className={`voice-timer${connectionError ? ' is-error' : ''}`}>{requiresSecureContext ? 'HTTPS requerido' : connectionError ? (english ? 'Connection error' : 'Error de conexión') : formatCallDuration(callSeconds)}</p><p className="voice-status" aria-live="polite">{activityStatus}</p>{connectionError && !requiresSecureContext && <button type="button" className="voice-retry" onClick={retry}><IonIcon icon={refreshOutline} />{english ? 'Retry with VITACOACH' : 'Reintentar con VITACOACH'}</button>}<button className={`voice-mic${muted ? ' is-muted' : ' is-live'}`} aria-label={muted ? (english ? 'Unmute microphone' : 'Activar micrófono') : (english ? 'Mute microphone' : 'Silenciar micrófono')} aria-pressed={muted} disabled={!callActive || connectionError} onClick={toggleMute}><IonIcon icon={muted ? micOffOutline : micOutline} /></button></div></IonModal>;
+  return (
+    <IonModal
+      isOpen={open}
+      onWillPresent={() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      }}
+      onDidPresent={() => {
+        closeButtonRef.current?.focus();
+        void startCall();
+      }}
+      onDidDismiss={close}
+      className="voice-call-modal"
+    >
+      <div className="voice-call">
+        <audio
+          ref={audioRef}
+          className="voice-remote-audio"
+          autoPlay
+          playsInline
+          aria-hidden="true"
+          onPlaying={() => {
+            if (!activeRef.current) return;
+            setConnectionError(false);
+            setRequiresSecureContext(false);
+          }}
+        />
+        <button ref={closeButtonRef} className="voice-close" aria-label={english ? 'End call' : 'Finalizar llamada'} onClick={close}>
+          <IonIcon icon={closeOutline} />
+        </button>
+        <div className={`voice-orb${speaking ? ' is-speaking' : listening ? ' is-listening' : callActive ? ' is-connecting' : ''}`}>
+          <span>VC</span>
+        </div>
+        <p className="eyebrow">VITACOACH</p>
+        <h2>{english ? 'Voice call' : 'Llamada de voz'}</h2>
+        <p className={`voice-timer${connectionError ? ' is-error' : ''}`}>{requiresSecureContext ? 'HTTPS requerido' : connectionError ? (english ? 'Connection error' : 'Error de conexión') : meteringStarted ? formatCallDuration(callSeconds) : '00:00'}</p>
+        {!connectionError && <p className="voice-credit-status">{meteringStarted ? `${english ? 'Remaining' : 'Restante'}: ${formatCallDuration(Math.max(0, maxDurationSeconds - callSeconds))}` : english ? 'Your time starts with your first question.' : 'Tu tiempo empieza con tu primera consulta.'}</p>}
+        <p className="voice-status" aria-live="polite">
+          {activityStatus}
+        </p>
+        {connectionError && !requiresSecureContext && (
+          <button type="button" className="voice-retry" onClick={retry}>
+            <IonIcon icon={refreshOutline} />
+            {english ? 'Retry with VITACOACH' : 'Reintentar con VITACOACH'}
+          </button>
+        )}
+        <button className={`voice-mic${muted ? ' is-muted' : ' is-live'}`} aria-label={muted ? (english ? 'Unmute microphone' : 'Activar micrófono') : english ? 'Mute microphone' : 'Silenciar micrófono'} aria-pressed={muted} disabled={!callActive || connectionError} onClick={toggleMute}>
+          <IonIcon icon={muted ? micOffOutline : micOutline} />
+        </button>
+      </div>
+    </IonModal>
+  );
 }
 
 export default Coach;
