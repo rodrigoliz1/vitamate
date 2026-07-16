@@ -9,7 +9,7 @@ export function classifyCoachTask(message: string, attachment: CoachAttachment =
   if (attachment.document || /laboratorio|analisis|estudio|documento|pdf|glucosa|colesterol|sangre|lesion|dolor|mareo|cansad|dormi|sueno|estres|enferm/.test(text)) return 'health';
   if (/cambia|reemplaza|sustituye|intercambia/.test(text) && /plan|menu|comida|ingrediente|desayuno|cena|colacion/.test(text)) return 'plan_change';
   if (/(registra|agrega|anade).*(entren|actividad|correr|camin|pesas|gym|ejercicio)|(?:hice|entrene|corri|camine|termine).*(minut|hora|km|rutina|ejercicio)/.test(text)) return 'workout_log';
-  if (/^(?:registrame|registra|agregame|agrega|anade)\b/.test(text) || /^(me comi|comi|desayune|cene|tome)\b/.test(text)) return 'meal_log';
+  if (/^(?:registrame|registra|agregame|agrega|anade)\b/.test(text) || /\b(?:ya\s+)?(?:me\s+)?(?:comi|desayune|almorce|cene|tome|bebi)\b/.test(text)) return 'meal_log';
   if (/calori|proteina|carbohidr|grasa|macro|comida|alimento|receta|desayuno|cena|colacion|hambre|dieta|nutric|foto de alimento/.test(text)) return 'nutrition';
   if (/entren|ejercicio|rutina|serie|repeticion|sentadilla|press|correr|caminar|gym|fuerza|cardio|movilidad/.test(text)) return 'training';
   if (/progreso|avance|peso|meta|semana|adherencia|balance|como voy|planea mi dia|plan my day/.test(text)) return 'progress';
@@ -99,6 +99,7 @@ export function compactRealtimeCoachContext(context: CoachContext): Record<strin
     },
     weightTrend: context.weightTrend,
     healthSummary: context.healthSummary,
+    ...(context.mealPlanContext ? { currentMealPlan: compactMealPlan(context.mealPlanContext) } : {}),
   };
 }
 

@@ -231,10 +231,9 @@ export async function fetchRealtimeToken(context: CoachChatContext): Promise<Rea
   });
 }
 
-export async function recordCoachCall(input: { locale: AppLocale; durationSeconds: number; startedAt: string; endedAt: string; usage?: RealtimeCallUsage }): Promise<CoachChatMessage> {
-  const data = await request<{ assistantMessage: CoachChatMessage; persisted: boolean }>('/v1/coach/calls', {
+export async function recordCoachCall(input: { locale: AppLocale; durationSeconds: number; startedAt: string; endedAt: string; usage?: RealtimeCallUsage }): Promise<void> {
+  await request<{ recorded: boolean }>('/v1/coach/calls', {
     method: 'POST',
     body: JSON.stringify(input),
   });
-  return data.assistantMessage;
 }

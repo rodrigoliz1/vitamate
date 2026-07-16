@@ -44,7 +44,7 @@ function extractLookup(message: string): string | null {
 
 function extractSimpleFoodLog(message: string): { food: string; quantity: number; unit: 'count' | 'g' | 'kg' } | null {
   const text = message.trim().replace(/[?.!]+$/, '');
-  const match = text.match(/^(?:agrega|agr[eé]game|a[nñ]ade|registra|reg[ií]strame)\s+(?:(\d+(?:[.,]\d+)?)\s*(kg|kilos?|g|gramos?)?\s*)?(?:una?|la|el)?\s*(.+)$/i);
+  const match = text.match(/^(?:(?:agrega|agr[eé]game|a[nñ]ade|registra|reg[ií]strame)|(?:(?:hoy|ya)\s+)?(?:me\s+)?(?:com[ií]|desayun[eé]|almorc[eé]|cen[eé]|tom[eé]|beb[ií]))\s+(?:(\d+(?:[.,]\d+)?)\s*(kg|kilos?|g|gramos?)?\s*)?(?:una?|la|el)?\s*(.+)$/i);
   if (!match?.[3] || /\b(?:entrenamiento|actividad|ejercicio|rutina)\b/i.test(match[3])) return null;
   const quantity = Math.max(0.1, Number((match[1] ?? '1').replace(',', '.')));
   const rawUnit = (match[2] ?? '').toLocaleLowerCase('es-MX');

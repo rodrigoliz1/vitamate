@@ -6,7 +6,7 @@ import { buildWeeklyNutritionBalance, buildWeeklyWorkoutBalance, summarizeNutrit
 import { BrandMark } from '../components/BrandMark';
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, recordCoachCall, sendCoachMessage, type CoachChatContext, type PhotoAnalysis, type RealtimeCallUsage } from '../services/api';
+import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, recordCoachCall, sendCoachMessage, type CoachAction, type CoachChatContext, type PhotoAnalysis, type RealtimeCallUsage } from '../services/api';
 import { pickNativePhoto, type NativePhotoSource } from '../services/nativeCamera';
 import { isNativeIos } from '../services/nativePlatform';
 import { prepareFoodPhoto } from '../services/imageCompression';
@@ -77,7 +77,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     ? ['Plan my day', 'How can I reach my protein goal?', 'Be honest about my progress']
     : ['Planea mi día', '¿Cómo alcanzo mi proteína?', 'Sé honesto con mi progreso'];
 
-  const context = (message = ''): CoachChatContext => {
+  const context = (message = '', includeActionContext = false): CoachChatContext => {
     const todayNutrition = summarizeNutritionDay(snapshot.meals);
     const weeklyNutrition = buildWeeklyNutritionBalance(snapshot.meals, snapshot.nutritionTarget);
     const weeklyWorkout = buildWeeklyWorkoutBalance(profile, snapshot.workoutSessions);
@@ -91,7 +91,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
         ? { type: 'replace_ingredient' as const, ingredient: parameters.get('ingredient') ?? undefined }
         : undefined;
     const normalizedMessage = message.toLocaleLowerCase('es-MX');
-    const needsPlan = Boolean(planChangeTarget) || /(cambia|reemplaza|sustituye|intercambia).*(plan|menú|menu|comida|ingrediente)/.test(normalizedMessage);
+    const needsPlan = includeActionContext || Boolean(planChangeTarget) || /(cambia|reemplaza|sustituye|intercambia).*(plan|menú|menu|comida|ingrediente)/.test(normalizedMessage);
     const needsHealthDocuments = /laboratorio|análisis|analisis|estudio|documento|pdf|resultado|glucosa|colesterol/.test(normalizedMessage);
     const needsWorkoutCatalog = !message || /entren|ejercicio|rutina|serie|repetición|repeticion|gym|fuerza|cardio/.test(normalizedMessage);
     return {
@@ -160,6 +160,27 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
   });
   useEffect(() => { const element = conversationRef.current; if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }); }, [snapshot.coachMessages.length, busy, pendingMeal, lastAction]);
 
+  const applyCoachAction = (action: CoachAction): { success: true; message: string } => {
+    if (action.type === 'log_meal') {
+      const id = onAddMeal({ ...action.meal, source: 'manual' });
+      setLastAction({ kind: 'meal', id, label: action.meal.name });
+      return { success: true, message: english ? `${action.meal.name} was registered.` : `${action.meal.name} quedó registrada.` };
+    }
+    if (action.type === 'log_workout') {
+      const id = onAddManualWorkout({ title: action.workout.title, activityType: action.workout.activityType, completedAt: action.workout.occurredAt, durationMinutes: action.workout.durationMinutes, caloriesBurned: action.workout.caloriesBurned, perceivedEffort: action.workout.perceivedEffort });
+      setLastAction({ kind: 'workout', id, label: action.workout.title });
+      return { success: true, message: english ? `${action.workout.title} was registered.` : `${action.workout.title} quedó registrada.` };
+    }
+    if (action.type === 'replace_plan_meal') {
+      onReplaceMealPlanOption(action.change.slotId, action.change.option);
+      setLastAction({ kind: 'plan', label: `${action.change.option.name} · plan y súper actualizados` });
+      return { success: true, message: english ? 'The meal plan and grocery list were updated.' : 'El plan y la lista del súper quedaron actualizados.' };
+    }
+    onReplaceMealPlanIngredient(action.change.ingredientToReplace, action.change.replacementIngredient, action.change.slotId);
+    setLastAction({ kind: 'plan', label: `${action.change.ingredientToReplace} → ${action.change.replacementIngredient}` });
+    return { success: true, message: english ? 'The ingredient was replaced in the plan and grocery list.' : 'El ingrediente se sustituyó en el plan y la lista del súper.' };
+  };
+
   const ask = async (content: string, options?: { appendUser?: boolean; history?: CoachChatMessage[]; attachment?: string | { filename: string; mimeType: 'application/pdf'; dataUrl: string } }): Promise<string | null> => {
     if (!content.trim() || busy) return null;
     setError(''); setBusy(true);
@@ -169,19 +190,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     if (appendUser) onAppendMessages([userMessage]);
     try {
       const reply = await sendCoachMessage(context(content.trim()), history, content.trim(), options?.attachment, appendUser ? userMessage : undefined, snapshot.coachMemories);
-      if (reply.action?.type === 'log_meal') {
-        const id = onAddMeal({ ...reply.action.meal, source: 'manual' });
-        setLastAction({ kind: 'meal', id, label: reply.action.meal.name });
-      } else if (reply.action?.type === 'log_workout') {
-        const id = onAddManualWorkout({ title: reply.action.workout.title, activityType: reply.action.workout.activityType, completedAt: reply.action.workout.occurredAt, durationMinutes: reply.action.workout.durationMinutes, caloriesBurned: reply.action.workout.caloriesBurned, perceivedEffort: reply.action.workout.perceivedEffort });
-        setLastAction({ kind: 'workout', id, label: reply.action.workout.title });
-      } else if (reply.action?.type === 'replace_plan_meal') {
-        onReplaceMealPlanOption(reply.action.change.slotId, reply.action.change.option);
-        setLastAction({ kind: 'plan', label: `${reply.action.change.option.name} · plan y súper actualizados` });
-      } else if (reply.action?.type === 'replace_plan_ingredient') {
-        onReplaceMealPlanIngredient(reply.action.change.ingredientToReplace, reply.action.change.replacementIngredient, reply.action.change.slotId);
-        setLastAction({ kind: 'plan', label: `${reply.action.change.ingredientToReplace} → ${reply.action.change.replacementIngredient}` });
-      }
+      if (reply.action) applyCoachAction(reply.action);
       onAppendMessages([reply.assistantMessage ?? { id: createId(), role: 'assistant', content: reply.response, createdAt: new Date().toISOString() }]);
       onApplyMemoryUpdates(reply.memoryUpdates ?? []);
       return reply.response;
@@ -268,13 +277,8 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       {lastAction && <article className="coach-action-confirmed"><IonIcon icon={checkmarkCircleOutline} /><div><strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : 'Plan alimenticio actualizado'}</strong><span>{lastAction.label}</span></div>{lastAction.kind !== 'plan' && lastAction.id && <button onClick={() => { if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!); else onDeleteWorkout(lastAction.id!); setLastAction(null); }}>Deshacer</button>}</article>}
       <div ref={endRef} />
     </section>
-  </main></IonContent><IonFooter className="coach-input-footer">{composer}</IonFooter><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={context} onClose={() => setVoiceOpen(false)} onAsk={(text) => ask(text)} onEnded={async (event) => {
-    try {
-      onAppendMessages([await recordCoachCall({ locale: uiLocale, ...event })]);
-    } catch {
-      const duration = formatCallDuration(event.durationSeconds);
-      onAppendMessages([{ id: createId(), role: 'assistant', content: english ? `📞 Voice call with VITACOACH · ${duration}` : `📞 Llamada con VITACOACH · ${duration}`, createdAt: event.endedAt }]);
-    }
+  </main></IonContent><IonFooter className="coach-input-footer">{composer}</IonFooter><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={() => context('', true)} onClose={() => setVoiceOpen(false)} onAction={applyCoachAction} onEnded={(event) => {
+    void recordCoachCall({ locale: uiLocale, ...event }).catch(() => undefined);
   }} /></IonPage>;
 };
 
@@ -330,7 +334,101 @@ function accumulateRealtimeUsage(current: RealtimeCallUsage, usage?: RealtimeRes
   };
 }
 
-function VoiceCall({ open, english, getContext, onClose, onAsk, onEnded }: { open: boolean; english: boolean; getContext(): CoachChatContext; onClose(): void; onAsk(text: string): Promise<string | null>; onEnded(event: { durationSeconds: number; startedAt: string; endedAt: string; usage: RealtimeCallUsage }): void | Promise<void> }) {
+function realtimeString(value: unknown, field: string, maxLength = 240): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`Falta ${field}`);
+  return value.trim().slice(0, maxLength);
+}
+
+function realtimeNumber(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Falta ${field}`);
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function realtimeDate(value: unknown): string {
+  if (typeof value === 'string' && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  return new Date().toISOString();
+}
+
+function realtimeStringArray(value: unknown, field: string, maxItems: number): string[] {
+  if (!Array.isArray(value)) throw new Error(`Falta ${field}`);
+  const items = value.map((item) => typeof item === 'string' ? item.trim().slice(0, 400) : '').filter(Boolean).slice(0, maxItems);
+  if (!items.length) throw new Error(`Falta ${field}`);
+  return items;
+}
+
+function realtimeToolAction(name: string, rawArguments: string): CoachAction {
+  const args = JSON.parse(rawArguments || '{}') as Record<string, unknown>;
+  if (name === 'log_meal') {
+    const mealType = realtimeString(args.mealType, 'mealType', 20);
+    if (!['breakfast', 'lunch', 'dinner', 'snack'].includes(mealType)) throw new Error('mealType inválido');
+    return {
+      type: 'log_meal',
+      meal: {
+        name: realtimeString(args.name, 'name', 180),
+        mealType: mealType as MealType,
+        occurredAt: realtimeDate(args.occurredAt),
+        calories: Math.round(realtimeNumber(args.calories, 'calories', 0, 10_000)),
+        proteinG: Math.round(realtimeNumber(args.proteinG, 'proteinG', 0, 1_000) * 10) / 10,
+        carbohydratesG: Math.round(realtimeNumber(args.carbohydratesG, 'carbohydratesG', 0, 1_000) * 10) / 10,
+        fatG: Math.round(realtimeNumber(args.fatG, 'fatG', 0, 1_000) * 10) / 10,
+      },
+    };
+  }
+  if (name === 'log_workout') {
+    const activityType = realtimeString(args.activityType, 'activityType', 20);
+    if (!['strength', 'cardio', 'mobility', 'sport', 'other'].includes(activityType)) throw new Error('activityType inválido');
+    return {
+      type: 'log_workout',
+      workout: {
+        title: realtimeString(args.title, 'title', 180),
+        activityType: activityType as NonNullable<WorkoutSession['activityType']>,
+        occurredAt: realtimeDate(args.occurredAt),
+        durationMinutes: Math.round(realtimeNumber(args.durationMinutes, 'durationMinutes', 1, 1_440)),
+        caloriesBurned: Math.round(realtimeNumber(args.caloriesBurned, 'caloriesBurned', 0, 20_000)),
+        perceivedEffort: Math.round(realtimeNumber(args.perceivedEffort, 'perceivedEffort', 1, 10)),
+      },
+    };
+  }
+  if (name === 'replace_plan_meal') {
+    const mealType = realtimeString(args.mealType, 'mealType', 20);
+    const difficulty = realtimeString(args.difficulty, 'difficulty', 20);
+    if (!['breakfast', 'lunch', 'dinner', 'snack'].includes(mealType)) throw new Error('mealType inválido');
+    if (!['basic', 'intermediate', 'advanced'].includes(difficulty)) throw new Error('difficulty inválido');
+    return {
+      type: 'replace_plan_meal',
+      change: {
+        slotId: realtimeString(args.slotId, 'slotId', 160),
+        option: {
+          id: typeof args.optionId === 'string' && args.optionId.trim() ? args.optionId.trim().slice(0, 160) : `vitacoach-${Date.now()}`,
+          name: realtimeString(args.name, 'name', 180),
+          mealType: mealType as MealType,
+          calories: Math.round(realtimeNumber(args.calories, 'calories', 0, 5_000)),
+          proteinG: Math.round(realtimeNumber(args.proteinG, 'proteinG', 0, 500)),
+          carbohydratesG: Math.round(realtimeNumber(args.carbohydratesG, 'carbohydratesG', 0, 500)),
+          fatG: Math.round(realtimeNumber(args.fatG, 'fatG', 0, 500)),
+          ingredients: realtimeStringArray(args.ingredients, 'ingredients', 20),
+          steps: realtimeStringArray(args.steps, 'steps', 12),
+          prepMinutes: Math.round(realtimeNumber(args.prepMinutes, 'prepMinutes', 1, 600)),
+          difficulty: difficulty as MealPlanOption['difficulty'],
+          imageUrl: null,
+        },
+      },
+    };
+  }
+  if (name === 'replace_plan_ingredient') {
+    return {
+      type: 'replace_plan_ingredient',
+      change: {
+        slotId: typeof args.slotId === 'string' && args.slotId.trim() ? args.slotId.trim().slice(0, 160) : undefined,
+        ingredientToReplace: realtimeString(args.ingredientToReplace, 'ingredientToReplace'),
+        replacementIngredient: realtimeString(args.replacementIngredient, 'replacementIngredient'),
+      },
+    };
+  }
+  throw new Error('Acción no autorizada');
+}
+
+function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { open: boolean; english: boolean; getContext(): CoachChatContext; onClose(): void; onAction(action: CoachAction): { success: true; message: string } | Promise<{ success: true; message: string }>; onEnded(event: { durationSeconds: number; startedAt: string; endedAt: string; usage: RealtimeCallUsage }): void | Promise<void> }) {
   const [listening, setListening] = useState(false);
   const [callActive, setCallActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -449,7 +547,6 @@ function VoiceCall({ open, english, getContext, onClose, onAsk, onEnded }: { ope
         channel.send(JSON.stringify({
           type: 'response.create',
           response: {
-            input: [],
             output_modalities: ['audio'],
             max_output_tokens: 100,
             instructions: `This is the opening of the call. Say exactly this greeting, naturally and warmly, with no extra words: ${JSON.stringify(greeting)}`,
@@ -462,14 +559,24 @@ function VoiceCall({ open, english, getContext, onClose, onAsk, onEnded }: { ope
         setConnectionError(true);
         setStatus(english ? 'The call channel was interrupted.' : 'Se interrumpió el canal de la llamada.');
       };
-      const resolveReportedUpdate = async (callId: string, transcript: string) => {
+      const resolveToolCall = async (callId: string, name: string, rawArguments: string) => {
         if (completedToolCallsRef.current.has(callId)) return;
         completedToolCallsRef.current.add(callId);
-        const reply = await onAsk(transcript);
+        setListening(false);
+        setSpeaking(false);
+        speakingRef.current = false;
+        setStatus(english ? 'Updating your VITAMATE data…' : 'Actualizando tus datos en VITAMATE…');
+        let output: Record<string, unknown>;
+        try {
+          const action = realtimeToolAction(name, rawArguments);
+          output = await onAction(action);
+        } catch (error) {
+          output = { success: false, message: error instanceof Error ? error.message : (english ? 'The request could not be applied.' : 'No se pudo aplicar la solicitud.') };
+        }
         if (!channelRef.current || channelRef.current.readyState !== 'open') return;
         channelRef.current.send(JSON.stringify({
           type: 'conversation.item.create',
-          item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ recorded: Boolean(reply), transcript }) },
+          item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
         }));
         channelRef.current.send(JSON.stringify({ type: 'response.create' }));
       };
@@ -512,19 +619,18 @@ function VoiceCall({ open, english, getContext, onClose, onAsk, onEnded }: { ope
           }
           if (payload.type === 'response.done') {
             usageRef.current = accumulateRealtimeUsage(usageRef.current, payload.response?.usage);
+            let hasToolCall = false;
             for (const output of payload.response?.output ?? []) {
-              if (output.type !== 'function_call' || output.name !== 'record_reported_update' || !output.call_id) continue;
-              try {
-                const args = JSON.parse(output.arguments ?? '{}') as { transcript?: string };
-                if (args.transcript?.trim()) void resolveReportedUpdate(output.call_id, args.transcript.trim());
-              } catch { /* El modelo no pudo formar argumentos válidos; continúa la conversación. */ }
+              if (output.type !== 'function_call' || !output.name || !output.call_id) continue;
+              hasToolCall = true;
+              void resolveToolCall(output.call_id, output.name, output.arguments ?? '{}');
             }
-          }
-          if (payload.type === 'response.done') {
-            speakingRef.current = false;
-            setSpeaking(false);
-            setListening(!mutedRef.current);
-            setStatus(mutedRef.current ? (english ? 'Microphone muted' : 'Micrófono silenciado') : (english ? 'Listening…' : 'Escuchando…'));
+            if (!hasToolCall) {
+              speakingRef.current = false;
+              setSpeaking(false);
+              setListening(!mutedRef.current);
+              setStatus(mutedRef.current ? (english ? 'Microphone muted' : 'Micrófono silenciado') : (english ? 'Listening…' : 'Escuchando…'));
+            }
           }
         } catch { /* Ignore non-JSON transport events. */ }
       };

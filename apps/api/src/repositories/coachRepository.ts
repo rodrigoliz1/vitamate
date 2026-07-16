@@ -144,49 +144,6 @@ export async function persistCoachExchange(input: {
   return { userMessage, assistantMessage, memoryUpdated };
 }
 
-export async function persistCoachCall(input: {
-  userId: string;
-  durationSeconds: number;
-  startedAt: string;
-  endedAt: string;
-  locale: 'es-MX' | 'en-US';
-}): Promise<StoredCoachMessage> {
-  const supabase = requireSupabase();
-  const thread = await ensureThread(input.userId);
-  const duration = Math.max(0, Math.round(input.durationSeconds));
-  const minutes = Math.floor(duration / 60).toString().padStart(2, '0');
-  const seconds = (duration % 60).toString().padStart(2, '0');
-  const message: StoredCoachMessage = {
-    id: randomUUID(),
-    role: 'assistant',
-    content: input.locale === 'en-US'
-      ? `📞 Voice call with VITACOACH · ${minutes}:${seconds}`
-      : `📞 Llamada con VITACOACH · ${minutes}:${seconds}`,
-    createdAt: input.endedAt,
-  };
-  const { error } = await supabase.from('coach_messages').insert({
-    id: message.id,
-    user_id: input.userId,
-    thread_id: thread.id,
-    role: message.role,
-    content: message.content,
-    created_at: message.createdAt,
-    metadata: {
-      source: 'vitacoach_call',
-      duration_seconds: duration,
-      started_at: input.startedAt,
-      ended_at: input.endedAt,
-    },
-  });
-  if (error) throw error;
-  const { error: threadError } = await supabase.from('coach_threads').update({
-    updated_at: input.endedAt,
-    last_message_at: input.endedAt,
-  }).eq('id', thread.id).eq('user_id', input.userId);
-  if (threadError) throw threadError;
-  return message;
-}
-
 export async function listCoachMessages(userId: string, limit: number, before?: string): Promise<StoredCoachMessage[]> {
   const supabase = requireSupabase();
   const thread = await ensureThread(userId);
