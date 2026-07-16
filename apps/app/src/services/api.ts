@@ -201,7 +201,28 @@ export async function fetchCoachHistory(limit = 100): Promise<CoachChatMessage[]
   return data.messages;
 }
 
-export interface RealtimeToken { value: string; expires_at?: number }
+export interface RealtimeToken {
+  value: string;
+  expires_at?: number;
+  session?: {
+    model?: string;
+    output_modalities?: string[];
+    audio?: { output?: { voice?: string } };
+  };
+}
+
+export interface RealtimeCallUsage {
+  responses: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  inputTextTokens: number;
+  inputAudioTokens: number;
+  cachedTextTokens: number;
+  cachedAudioTokens: number;
+  outputTextTokens: number;
+  outputAudioTokens: number;
+}
 
 export async function fetchRealtimeToken(context: CoachChatContext): Promise<RealtimeToken> {
   return request<RealtimeToken>('/v1/coach/realtime-token', {
@@ -210,7 +231,7 @@ export async function fetchRealtimeToken(context: CoachChatContext): Promise<Rea
   });
 }
 
-export async function recordCoachCall(input: { locale: AppLocale; durationSeconds: number; startedAt: string; endedAt: string }): Promise<CoachChatMessage> {
+export async function recordCoachCall(input: { locale: AppLocale; durationSeconds: number; startedAt: string; endedAt: string; usage?: RealtimeCallUsage }): Promise<CoachChatMessage> {
   const data = await request<{ assistantMessage: CoachChatMessage; persisted: boolean }>('/v1/coach/calls', {
     method: 'POST',
     body: JSON.stringify(input),

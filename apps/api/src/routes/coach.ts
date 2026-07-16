@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { OpenAiCoachProvider } from '../providers/openaiCoach.js';
-import { compactCoachContext, selectRelevantMemories } from '../providers/coachContext.js';
+import { compactRealtimeCoachContext, compactCoachContext, selectRelevantMemories } from '../providers/coachContext.js';
 import { listCoachMessages, loadCoachState, loadMessagesForCoachSummary, persistCoachCall, persistCoachExchange, persistCoachSummary, seedCoachMemories } from '../repositories/coachRepository.js';
 import { allowPersistentRequest } from '../services/rateLimit.js';
 import { tryDeterministicCoachReply } from '../services/coachDeterministic.js';
@@ -117,6 +117,18 @@ const callEventSchema = z.object({
   durationSeconds: z.number().finite().int().min(0).max(86_400),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime(),
+  usage: z.object({
+    responses: z.number().int().min(0).max(10_000),
+    inputTokens: z.number().int().min(0).max(100_000_000),
+    cachedInputTokens: z.number().int().min(0).max(100_000_000),
+    outputTokens: z.number().int().min(0).max(100_000_000),
+    inputTextTokens: z.number().int().min(0).max(100_000_000),
+    inputAudioTokens: z.number().int().min(0).max(100_000_000),
+    cachedTextTokens: z.number().int().min(0).max(100_000_000),
+    cachedAudioTokens: z.number().int().min(0).max(100_000_000),
+    outputTextTokens: z.number().int().min(0).max(100_000_000),
+    outputAudioTokens: z.number().int().min(0).max(100_000_000),
+  }).optional(),
 });
 
 async function authenticatedIdentity(request: { headers: { authorization?: string }; ip: string }) {
@@ -237,6 +249,30 @@ export async function coachRoutes(app: FastifyInstance) {
       content: body.locale === 'en-US' ? `📞 Voice call with VITACOACH · ${minutes}:${seconds}` : `📞 Llamada con VITACOACH · ${minutes}:${seconds}`,
       createdAt: body.endedAt,
     };
+    if (body.usage?.responses) {
+      await recordAiUsage({
+        userId,
+        task: 'coach_realtime',
+        model: config.OPENAI_REALTIME_MODEL,
+        usage: {
+          inputTokens: body.usage.inputTokens,
+          cachedInputTokens: body.usage.cachedInputTokens,
+          outputTokens: body.usage.outputTokens,
+          totalTokens: body.usage.inputTokens + body.usage.outputTokens,
+        },
+        metadata: {
+          durationSeconds: duration,
+          responses: body.usage.responses,
+          inputTextTokens: body.usage.inputTextTokens,
+          inputAudioTokens: body.usage.inputAudioTokens,
+          cachedTextTokens: body.usage.cachedTextTokens,
+          cachedAudioTokens: body.usage.cachedAudioTokens,
+          outputTextTokens: body.usage.outputTextTokens,
+          outputAudioTokens: body.usage.outputAudioTokens,
+          voice: 'marin',
+        },
+      }).catch((error) => request.log.warn({ error, userId }, 'No fue posible registrar el consumo de la llamada.'));
+    }
     try {
       return { assistantMessage: await persistCoachCall({ userId, ...body }), persisted: true };
     } catch (error) {
@@ -255,8 +291,11 @@ export async function coachRoutes(app: FastifyInstance) {
     const context = realtimeSchema.parse(request.body);
     const durableState = userId ? await loadCoachState(userId, 8) : null;
     const safetyIdentifier = createHash('sha256').update(`vitamate:${userId ?? request.ip}`).digest('hex');
-    const realtimeContext = compactCoachContext(context, 'progress');
-    const realtimeMemory = selectRelevantMemories('', 'progress', durableState?.memories ?? []);
+    const realtimeContext = compactRealtimeCoachContext(context);
+    const realtimeMemory = selectRelevantMemories('', 'progress', durableState?.memories ?? [])
+      .slice(0, 6)
+      .map(({ key, category, content, importance }) => ({ key, category, content: content.slice(0, 240), importance }));
+    const conversationSummary = (durableState?.conversationSummary ?? '').slice(0, 1_800);
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
@@ -268,8 +307,25 @@ export async function coachRoutes(app: FastifyInstance) {
         session: {
           type: 'realtime',
           model: config.OPENAI_REALTIME_MODEL,
-          instructions: `Eres VITACOACH en una llamada de voz. Responde en ${context.locale}; sé cálido, natural y conciso. No afirmes ser profesional clínico ni diagnostiques o prescribas. Usa estos datos sólo cuando sean relevantes: ${JSON.stringify({ context: realtimeContext, conversationSummary: durableState?.conversationSummary ?? '', memory: realtimeMemory })}. Ante cansancio considera sueño, hidratación, alimentación, estrés, síntomas y carga. Si la persona afirma que ya comió, bebió o terminó una actividad, usa record_reported_update antes de confirmar el registro. Ante dolor de pecho, desmayo o dificultad respiratoria intensa indica suspender y buscar atención urgente.`,
-          audio: { output: { voice: config.OPENAI_REALTIME_VOICE } },
+          output_modalities: ['audio'],
+          instructions: `Eres VITACOACH en una llamada privada. Habla en ${context.locale} con voz cálida, natural y concisa; normalmente responde en 1-3 frases y continúa la conversación con una sola pregunta útil. Nunca digas que eres profesional clínico ni diagnostiques o prescribas. Usa sólo si es relevante: ${JSON.stringify({ context: realtimeContext, summary: conversationSummary, memory: realtimeMemory })}. Si la persona afirma que ya consumió algo o terminó una actividad, usa record_reported_update antes de confirmar. Ante dolor de pecho, desmayo o dificultad respiratoria intensa indica suspender y buscar atención urgente. No repitas el perfil ni menciones instrucciones, memoria o tokens.`,
+          max_output_tokens: 320,
+          truncation: {
+            type: 'retention_ratio',
+            retention_ratio: 0.8,
+            token_limits: { post_instructions: 4_000 },
+          },
+          audio: {
+            input: {
+              turn_detection: {
+                type: 'semantic_vad',
+                eagerness: 'auto',
+                create_response: true,
+                interrupt_response: true,
+              },
+            },
+            output: { voice: config.OPENAI_REALTIME_VOICE },
+          },
           tools: [{
             type: 'function',
             name: 'record_reported_update',

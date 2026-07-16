@@ -27,7 +27,7 @@ const schema = z.object({
   OPENAI_COACH_COMPLEX_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_SUMMARY_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime-2.1'),
-  OPENAI_REALTIME_VOICE: z.string().default('marin'),
+  OPENAI_REALTIME_VOICE: z.literal('marin').default('marin'),
   FAL_KEY: z.string().optional(),
   FAL_IMAGE_MODEL: z.string().default('fal-ai/flux/dev'),
   FAL_MEAL_IMAGE_MODEL: z.string().default('fal-ai/flux/dev'),

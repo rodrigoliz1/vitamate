@@ -71,7 +71,7 @@ Agregar en **Render → Environment**. Las variables marcadas como secretas nunc
 | `OPENAI_VISION_MODEL` | `gpt-4o-mini` o modelo elegido | texto |
 | `OPENAI_COACH_MODEL` | `gpt-4o-mini` o modelo elegido | texto |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` | texto |
-| `OPENAI_REALTIME_VOICE` | `marin` o voz elegida | texto |
+| `OPENAI_REALTIME_VOICE` | `marin` | texto |
 | `FAL_KEY` | clave rotada fal.ai | secreto |
 | `FAL_IMAGE_MODEL` | `fal-ai/nano-banana-pro` o modelo contratado | texto |
 | `FAL_MEAL_IMAGE_MODEL` | `fal-ai/flux/dev` o modelo contratado | texto |

@@ -78,6 +78,30 @@ export function compactCoachContext(context: CoachContext, task: CoachTask): Rec
   return base;
 }
 
+export function compactRealtimeCoachContext(context: CoachContext): Record<string, unknown> {
+  return {
+    locale: context.locale,
+    currentDateTime: context.currentDateTime,
+    timezone: context.timezone,
+    user: {
+      preferredName: context.profile.preferredName,
+      primaryGoal: context.profile.primaryGoal,
+      coachStyle: context.profile.coachStyle,
+      safetyFlags: context.profile.safetyFlags,
+    },
+    nutrition: {
+      target: context.nutritionTarget,
+      today: context.todayNutrition,
+    },
+    training: {
+      week: context.weeklyWorkout,
+      recent: context.recentWorkouts.slice(0, 2),
+    },
+    weightTrend: context.weightTrend,
+    healthSummary: context.healthSummary,
+  };
+}
+
 export function selectRelevantMemories(message: string, task: CoachTask, memories: CoachLongTermMemory[]): CoachLongTermMemory[] {
   const words = new Set(normalize(message).split(/[^a-z0-9]+/).filter((word) => word.length >= 4));
   const categoriesByTask: Record<CoachTask, Set<CoachLongTermMemory['category']>> = {
