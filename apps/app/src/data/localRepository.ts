@@ -5,6 +5,7 @@ import { generateStarterWorkoutPlan, generateWeeklyMealPlan, weeklyMealPlanForDa
   MealEntry,
   NutritionTarget,
   PersonalFood,
+  SleepEntry,
   UserProfile,
   WeightEntry,
   WorkoutPlan,
@@ -14,7 +15,7 @@ import { generateStarterWorkoutPlan, generateWeeklyMealPlan, weeklyMealPlanForDa
 import type { ReminderLog, WellnessReminder } from '../models/reminders';
 
 export interface VitamateSnapshot {
-  schemaVersion: 5;
+  schemaVersion: 6;
   profile: UserProfile | null;
   nutritionTarget: NutritionTarget | null;
   meals: MealEntry[];
@@ -22,6 +23,7 @@ export interface VitamateSnapshot {
   workoutPlan: WorkoutPlan | null;
   workoutSessions: WorkoutSession[];
   weightEntries: WeightEntry[];
+  sleepEntries: SleepEntry[];
   coachMessages: CoachChatMessage[];
   coachMemories: CoachMemory[];
   healthDocuments: HealthDocumentSummary[];
@@ -32,10 +34,10 @@ export interface VitamateSnapshot {
   cloudUpdatedAt?: string;
 }
 
-const STORAGE_KEY = 'vitamate.snapshot.v5';
-const LEGACY_STORAGE_KEYS = ['vitamate.snapshot.v4', 'vitamate.snapshot.v3', 'vitamate.snapshot.v2'];
+const STORAGE_KEY = 'vitamate.snapshot.v6';
+const LEGACY_STORAGE_KEYS = ['vitamate.snapshot.v5', 'vitamate.snapshot.v4', 'vitamate.snapshot.v3', 'vitamate.snapshot.v2'];
 const EMPTY: VitamateSnapshot = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   profile: null,
   nutritionTarget: null,
   meals: [],
@@ -43,6 +45,7 @@ const EMPTY: VitamateSnapshot = {
   workoutPlan: null,
   workoutSessions: [],
   weightEntries: [],
+  sleepEntries: [],
   coachMessages: [],
   coachMemories: [],
   healthDocuments: [],
@@ -91,13 +94,14 @@ export function normalizeVitamateSnapshot(value: Omit<Partial<VitamateSnapshot>,
   return {
     ...EMPTY,
     ...value,
-    schemaVersion: 5,
+    schemaVersion: 6,
     profile,
     meals: value.meals ?? [],
     personalFoods: value.personalFoods ?? [],
     workoutPlan: profile && legacyPlan ? generateStarterWorkoutPlan(profile) : value.workoutPlan ?? null,
     workoutSessions: value.workoutSessions ?? [],
     weightEntries: value.weightEntries ?? [],
+    sleepEntries: value.sleepEntries ?? [],
     coachMessages: value.coachMessages ?? [],
     coachMemories: value.coachMemories ?? [],
     healthDocuments: value.healthDocuments ?? [],
@@ -110,7 +114,7 @@ export function normalizeVitamateSnapshot(value: Omit<Partial<VitamateSnapshot>,
 
 export const browserLocalRepository = {
   empty(): VitamateSnapshot {
-    return { ...EMPTY, meals: [], personalFoods: [], workoutSessions: [], weightEntries: [], coachMessages: [], coachMemories: [], healthDocuments: [], reminders: [], reminderLogs: [], mealPlans: [] };
+    return { ...EMPTY, meals: [], personalFoods: [], workoutSessions: [], weightEntries: [], sleepEntries: [], coachMessages: [], coachMemories: [], healthDocuments: [], reminders: [], reminderLogs: [], mealPlans: [] };
   },
   load(): VitamateSnapshot {
     if (typeof window === 'undefined') return EMPTY;

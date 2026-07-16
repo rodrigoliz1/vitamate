@@ -232,6 +232,26 @@ export interface WeightEntry {
   recordedAt: string;
 }
 
+export type SleepEntrySource = 'manual' | 'apple_health' | 'vitacoach';
+
+export interface SleepEntry {
+  id: string;
+  startedAt: string;
+  endedAt: string;
+  durationMinutes: number;
+  source: SleepEntrySource;
+  quality?: 1 | 2 | 3 | 4 | 5;
+  note?: string;
+  externalId?: string;
+  stages?: {
+    awakeMinutes?: number;
+    remMinutes?: number;
+    deepMinutes?: number;
+    lightMinutes?: number;
+  };
+  createdAt: string;
+}
+
 export interface CoachChatMessage {
   id: string;
   role: 'user' | 'assistant';

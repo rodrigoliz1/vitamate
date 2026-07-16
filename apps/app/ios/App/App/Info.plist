@@ -42,7 +42,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>VITAMATE usa la cámara para analizar alimentos, escanear códigos de barras y adjuntar imágenes a VITACOACH.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>VITAMATE lee los datos de actividad que tú autorices para personalizar tus metas, entrenamientos y seguimiento.</string>
+	<string>VITAMATE lee la actividad, frecuencia cardiaca y sueño que tú autorices para personalizar tus metas, recuperación, entrenamientos y seguimiento.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VITAMATE usa el micrófono durante tus llamadas privadas con VITACOACH.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

@@ -2,7 +2,7 @@ import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'r
 import { IonActionSheet, IonButton, IonContent, IonFooter, IonIcon, IonModal, IonPage, IonSpinner, useIonViewDidEnter } from '@ionic/react';
 import { useLocation } from 'react-router-dom';
 import { callOutline, cameraOutline, chatbubbleEllipsesOutline, checkmarkCircleOutline, closeOutline, documentAttachOutline, folderOpenOutline, imagesOutline, micOutline, micOffOutline, paperPlaneOutline, refreshOutline, shieldCheckmarkOutline, sparklesOutline } from 'ionicons/icons';
-import { buildWeeklyNutritionBalance, buildWeeklyWorkoutBalance, summarizeNutritionDay, weeklyMealPlanForDate, type CoachChatMessage, type CoachMemoryUpdate, type HealthDocumentSummary, type MealEntry, type MealPlanOption, type MealType, type WorkoutSession } from '@vitamate/domain';
+import { buildWeeklyNutritionBalance, buildWeeklyWorkoutBalance, summarizeNutritionDay, weeklyMealPlanForDate, type CoachChatMessage, type CoachMemoryUpdate, type HealthDocumentSummary, type MealEntry, type MealPlanOption, type MealType, type SleepEntry, type WorkoutSession } from '@vitamate/domain';
 import { BrandMark } from '../components/BrandMark';
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
@@ -21,6 +21,8 @@ interface CoachProps {
   onDeleteMeal(id: string): void;
   onAddManualWorkout(workout: { title: string; activityType: WorkoutSession['activityType']; completedAt: string; durationMinutes: number; caloriesBurned: number; perceivedEffort: number }): string;
   onDeleteWorkout(id: string): void;
+  onAddSleep(sleep: Omit<SleepEntry, 'id' | 'createdAt'>): string;
+  onDeleteSleep(id: string): void;
   onAddHealthDocument(document: Omit<HealthDocumentSummary, 'id' | 'uploadedAt'>): string;
   onReplaceMealPlanOption(slotId: string, option: MealPlanOption): void;
   onReplaceMealPlanIngredient(ingredientToReplace: string, replacementIngredient: string, slotId?: string): void;
@@ -55,7 +57,7 @@ function inferMealType(date = new Date()): MealType {
 
 const MEAL_LABELS: Record<MealType, string> = { breakfast: 'Desayuno', lunch: 'Comida', dinner: 'Cena', snack: 'Colación' };
 
-const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onApplyMemoryUpdates, onAddMeal, onDeleteMeal, onAddManualWorkout, onDeleteWorkout, onAddHealthDocument, onReplaceMealPlanOption, onReplaceMealPlanIngredient }: CoachProps) => {
+const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onApplyMemoryUpdates, onAddMeal, onDeleteMeal, onAddManualWorkout, onDeleteWorkout, onAddSleep, onDeleteSleep, onAddHealthDocument, onReplaceMealPlanOption, onReplaceMealPlanIngredient }: CoachProps) => {
   const profile = snapshot.profile!;
   const location = useLocation();
   const uiLocale = resolveUiLocale(profile.locale);
@@ -66,7 +68,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
   const [pendingMeal, setPendingMeal] = useState<PendingPhotoMeal | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
-  const [lastAction, setLastAction] = useState<{ kind: 'meal' | 'workout' | 'plan'; id?: string; label: string } | null>(null);
+  const [lastAction, setLastAction] = useState<{ kind: 'meal' | 'workout' | 'sleep' | 'plan'; id?: string; label: string } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLElement>(null);
   const photoAlbumRef = useRef<HTMLInputElement>(null);
@@ -83,6 +85,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
     const weeklyWorkout = buildWeeklyWorkoutBalance(profile, snapshot.workoutSessions);
     const latestWeight = snapshot.weightEntries[0];
     const currentMealPlan = weeklyMealPlanForDate(snapshot.mealPlans);
+    const recentSleep = snapshot.sleepEntries.slice(0, 7);
     const parameters = new URLSearchParams(location.search);
     const planAction = parameters.get('planAction');
     const planChangeTarget = planAction === 'replace_meal'
@@ -120,6 +123,11 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       weightTrend: latestWeight ? { latestKg: latestWeight.weightKg, previousKg: snapshot.weightEntries[1]?.weightKg ?? null } : undefined,
       healthDocuments: needsHealthDocuments ? snapshot.healthDocuments.slice(0, 3).map(({ filename, uploadedAt, summary }) => ({ filename, uploadedAt, summary: summary.slice(0, 1200) })) : [],
       healthSummary,
+      sleepSummary: {
+        latestMinutes: recentSleep[0]?.durationMinutes,
+        averageMinutes7Days: recentSleep.length ? Math.round(recentSleep.reduce((sum, entry) => sum + entry.durationMinutes, 0) / recentSleep.length) : undefined,
+        recent: recentSleep.map(({ startedAt, endedAt, durationMinutes, quality, source }) => ({ startedAt, endedAt, durationMinutes, quality, source })),
+      },
       mealPlanContext: needsPlan && currentMealPlan ? JSON.stringify(currentMealPlan) : undefined,
       planChangeTarget,
     };
@@ -170,6 +178,12 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       const id = onAddManualWorkout({ title: action.workout.title, activityType: action.workout.activityType, completedAt: action.workout.occurredAt, durationMinutes: action.workout.durationMinutes, caloriesBurned: action.workout.caloriesBurned, perceivedEffort: action.workout.perceivedEffort });
       setLastAction({ kind: 'workout', id, label: action.workout.title });
       return { success: true, message: english ? `${action.workout.title} was registered.` : `${action.workout.title} quedó registrada.` };
+    }
+    if (action.type === 'log_sleep') {
+      const id = onAddSleep({ ...action.sleep, source: 'vitacoach' });
+      const label = `${Math.floor(action.sleep.durationMinutes / 60)} h ${action.sleep.durationMinutes % 60} min`;
+      setLastAction({ kind: 'sleep', id, label });
+      return { success: true, message: english ? `${label} of sleep was registered.` : `Se registraron ${label} de sueño.` };
     }
     if (action.type === 'replace_plan_meal') {
       onReplaceMealPlanOption(action.change.slotId, action.change.option);
@@ -274,7 +288,7 @@ const Coach = ({ snapshot, healthSummary, onAppendMessages, onMergeMessages, onA
       {snapshot.coachMessages.map((message) => <article key={message.id} className={`coach-message coach-message--${message.role}`}><span>{message.role === 'assistant' ? 'VC' : profile.preferredName.slice(0, 1).toUpperCase()}</span><div><small>{message.role === 'assistant' ? 'VITACOACH' : (english ? 'You' : 'Tú')}</small><p>{message.content}</p></div></article>)}
       {pendingMeal && <article className="coach-food-confirmation"><img src={pendingMeal.preview} alt="Alimento analizado" /><div><small>Estimación visual · {Math.round(pendingMeal.analysis.overallConfidence * 100)}% confianza</small><label className="field"><span>Alimento</span><input value={pendingMeal.name} onChange={(event) => setPendingMeal({ ...pendingMeal, name: event.target.value })} /></label><label className="field"><span>Momento detectado por la hora</span><select value={pendingMeal.mealType} onChange={(event) => setPendingMeal({ ...pendingMeal, mealType: event.target.value as MealType })}>{Object.entries(MEAL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><p><strong>{pendingMeal.analysis.totals.calories} kcal</strong> · {pendingMeal.analysis.totals.proteinG}g P · {pendingMeal.analysis.totals.carbohydratesG}g C · {pendingMeal.analysis.totals.fatG}g G</p><div><IonButton size="small" className="primary-button" onClick={confirmMeal}>Confirmar y registrar</IonButton><IonButton size="small" fill="clear" color="medium" onClick={() => setPendingMeal(null)}>Descartar</IonButton></div></div></article>}
       {busy && <article className="coach-message coach-message--assistant"><span>VC</span><div><small>VITACOACH</small><p className="coach-thinking"><IonSpinner name="dots" /> {english ? 'Thinking…' : 'Pensando…'}</p></div></article>}
-      {lastAction && <article className="coach-action-confirmed"><IonIcon icon={checkmarkCircleOutline} /><div><strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : 'Plan alimenticio actualizado'}</strong><span>{lastAction.label}</span></div>{lastAction.kind !== 'plan' && lastAction.id && <button onClick={() => { if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!); else onDeleteWorkout(lastAction.id!); setLastAction(null); }}>Deshacer</button>}</article>}
+      {lastAction && <article className="coach-action-confirmed"><IonIcon icon={checkmarkCircleOutline} /><div><strong>{lastAction.kind === 'meal' ? 'Comida registrada' : lastAction.kind === 'workout' ? 'Actividad registrada' : lastAction.kind === 'sleep' ? 'Sueño registrado' : 'Plan alimenticio actualizado'}</strong><span>{lastAction.label}</span></div>{lastAction.kind !== 'plan' && lastAction.id && <button onClick={() => { if (lastAction.kind === 'meal') onDeleteMeal(lastAction.id!); else if (lastAction.kind === 'workout') onDeleteWorkout(lastAction.id!); else onDeleteSleep(lastAction.id!); setLastAction(null); }}>Deshacer</button>}</article>}
       <div ref={endRef} />
     </section>
   </main></IonContent><IonFooter className="coach-input-footer">{composer}</IonFooter><IonActionSheet isOpen={photoPickerOpen} onDidDismiss={() => setPhotoPickerOpen(false)} header="Añadir foto de alimento" buttons={[{ text: 'Tomar foto', icon: cameraOutline, handler: () => { if (isNativeIos) void handleNativePhoto('camera'); else photoCameraRef.current?.click(); } }, { text: 'Elegir del álbum', icon: imagesOutline, handler: () => { if (isNativeIos) void handleNativePhoto('photos'); else photoAlbumRef.current?.click(); } }, { text: 'Elegir archivo', icon: folderOpenOutline, handler: () => photoFileRef.current?.click() }, { text: 'Cancelar', role: 'cancel' }]} /><VoiceCall open={voiceOpen} english={english} getContext={() => context('', true)} onClose={() => setVoiceOpen(false)} onAction={applyCoachAction} onEnded={(event) => {
@@ -387,6 +401,16 @@ function realtimeToolAction(name: string, rawArguments: string): CoachAction {
         caloriesBurned: Math.round(realtimeNumber(args.caloriesBurned, 'caloriesBurned', 0, 20_000)),
         perceivedEffort: Math.round(realtimeNumber(args.perceivedEffort, 'perceivedEffort', 1, 10)),
       },
+    };
+  }
+  if (name === 'log_sleep') {
+    const startedAt = realtimeDate(args.startedAt);
+    const endedAt = realtimeDate(args.endedAt);
+    const durationMinutes = Math.round(realtimeNumber(args.durationMinutes, 'durationMinutes', 30, 1_440));
+    const quality = typeof args.quality === 'number' ? Math.round(realtimeNumber(args.quality, 'quality', 1, 5)) as SleepEntry['quality'] : undefined;
+    return {
+      type: 'log_sleep',
+      sleep: { startedAt, endedAt, durationMinutes, quality, note: typeof args.note === 'string' ? args.note.trim().slice(0, 300) : undefined },
     };
   }
   if (name === 'replace_plan_meal') {

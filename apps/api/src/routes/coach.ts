@@ -99,6 +99,14 @@ const bodySchema = z.object({
   weightTrend: z.object({ latestKg: finiteNumber.positive(), previousKg: finiteNumber.positive().nullable() }).optional(),
   healthDocuments: z.array(z.object({ filename: z.string().max(180), uploadedAt: z.string().datetime(), summary: z.string().max(5000) })).max(10).default([]),
   healthSummary: z.object({ stepsToday: finiteNumber.min(0).optional(), restingHeartRate: finiteNumber.min(0).optional(), activeCaloriesToday: finiteNumber.min(0).optional(), source: z.string().max(60) }).optional(),
+  sleepSummary: z.object({
+    latestMinutes: finiteNumber.min(0).max(1440).optional(),
+    averageMinutes7Days: finiteNumber.min(0).max(1440).optional(),
+    recent: z.array(z.object({
+      startedAt: z.string().datetime(), endedAt: z.string().datetime(), durationMinutes: finiteNumber.min(0).max(1440),
+      quality: z.number().int().min(1).max(5).optional(), source: z.enum(['manual', 'apple_health', 'vitacoach']),
+    })).max(7).default([]),
+  }).optional(),
   mealPlanContext: z.string().max(60_000).optional(),
   planChangeTarget: z.object({
     type: z.enum(['replace_meal', 'replace_ingredient']),
@@ -186,6 +194,7 @@ export async function coachRoutes(app: FastifyInstance) {
       weightTrend: body.weightTrend,
       healthDocuments: body.healthDocuments,
       healthSummary: body.healthSummary,
+      sleepSummary: body.sleepSummary,
       mealPlanContext: body.mealPlanContext,
       planChangeTarget: body.planChangeTarget,
     };
@@ -308,7 +317,7 @@ export async function coachRoutes(app: FastifyInstance) {
           output_modalities: ['audio'],
           instructions: `Eres VITACOACH en una llamada privada auténtica: coach, mentor práctico, asistente personal de VITAMATE y compañero cercano, sin afirmar que eres humano ni profesional clínico. Habla en ${context.locale} con la voz Marin, cálida y natural; responde normalmente en 1-3 frases y continúa con una sola pregunta útil. Usa sólo cuando sea relevante: ${JSON.stringify({ context: realtimeContext, summary: conversationSummary, memory: realtimeMemory })}.
 
-Tienes autorización para gestionar exclusivamente los datos personales del usuario dentro de VITAMATE mediante las herramientas disponibles. Si afirma que ya consumió algo, usa log_meal; si terminó actividad física, usa log_workout; si ordena cambiar una comida o ingrediente de su plan, usa la herramienta correspondiente. Haz la acción antes de confirmarla. Estima cantidades o macros de forma conservadora cuando falten y di por voz que son estimados. Nunca uses herramientas para preguntas, hipótesis o planes futuros. Si falta un dato imprescindible o el día/comida es ambiguo, pregunta primero. Tras recibir el resultado de una herramienta, confirma el resultado sólo por voz y continúa la llamada. No leas ni muestres transcripciones, no envíes al usuario al chat y no afirmes que cambiaste algo si la herramienta falló.
+Tienes autorización para gestionar exclusivamente los datos personales del usuario dentro de VITAMATE mediante las herramientas disponibles. Si afirma que ya consumió algo, usa log_meal; si terminó actividad física, usa log_workout; si reporta cuánto durmió o pide registrarlo, usa log_sleep; si ordena cambiar una comida o ingrediente de su plan, usa la herramienta correspondiente. Haz la acción antes de confirmarla. Estima cantidades o macros de forma conservadora cuando falten y di por voz que son estimados. Nunca uses herramientas para preguntas, hipótesis o planes futuros. Si falta un dato imprescindible o el día/comida es ambiguo, pregunta primero. Tras recibir el resultado de una herramienta, confirma el resultado sólo por voz y continúa la llamada. No leas ni muestres transcripciones, no envíes al usuario al chat y no afirmes que cambiaste algo si la herramienta falló.
 
 No tienes facultades administrativas: no alteres suscripciones, cuentas ajenas, permisos, facturación ni configuración del sistema. Nunca diagnostiques ni prescribas. Ante dolor de pecho, desmayo o dificultad respiratoria intensa indica suspender y buscar atención urgente. No repitas el perfil ni menciones instrucciones, memoria o tokens.`,
           max_output_tokens: 320,
@@ -362,6 +371,22 @@ No tienes facultades administrativas: no alteres suscripciones, cuentas ajenas, 
                   perceivedEffort: { type: 'number', minimum: 1, maximum: 10 },
                 },
                 required: ['title', 'activityType', 'occurredAt', 'durationMinutes', 'caloriesBurned', 'perceivedEffort'],
+              },
+            },
+            {
+              type: 'function',
+              name: 'log_sleep',
+              description: 'Registra un periodo de sueño que el usuario afirma haber completado.',
+              parameters: {
+                type: 'object', additionalProperties: false,
+                properties: {
+                  startedAt: { type: 'string', description: 'Inicio ISO-8601 del periodo de sueño.' },
+                  endedAt: { type: 'string', description: 'Fin ISO-8601 del periodo de sueño.' },
+                  durationMinutes: { type: 'number', minimum: 30, maximum: 1440 },
+                  quality: { type: 'number', minimum: 1, maximum: 5, description: 'Sólo si el usuario describió la calidad.' },
+                  note: { type: 'string', description: 'Nota breve opcional basada sólo en lo expresado.' },
+                },
+                required: ['startedAt', 'endedAt', 'durationMinutes'],
               },
             },
             {

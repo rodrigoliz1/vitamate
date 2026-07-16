@@ -16,6 +16,7 @@ import {
   type MealEntry,
   type MealPlanOption,
   type PersonalFood,
+  type SleepEntry,
   type UserProfile,
   type WeightEntry,
   type WorkoutDay,
@@ -141,22 +142,6 @@ export function useVitamate() {
     void syncReminderNotifications(snapshot.reminders).catch(() => undefined);
   }, [snapshot.reminders]);
 
-  useEffect(() => {
-    if (!supportsNativeHealth() || window.localStorage.getItem('vitamate.health.connected') !== 'true') return;
-    void readNativeHealthSummary().then(setHealthSummary).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    const resume = () => {
-      void refreshBilling();
-      if (supportsNativeHealth() && window.localStorage.getItem('vitamate.health.connected') === 'true') {
-        void readNativeHealthSummary().then(setHealthSummary).catch(() => undefined);
-      }
-    };
-    window.addEventListener('vitamate:native-resume', resume);
-    return () => window.removeEventListener('vitamate:native-resume', resume);
-  }, [refreshBilling]);
-
   const update = useCallback((recipe: (current: VitamateSnapshot) => VitamateSnapshot) => {
     // Persistimos antes de que una navegación externa (Checkout, enlace mágico,
     // cierre de Safari) pueda desmontar React. Evita reiniciar el cuestionario.
@@ -165,6 +150,36 @@ export function useVitamate() {
     browserLocalRepository.save(next);
     setSnapshot(next);
   }, []);
+
+  const importHealthSummary = useCallback((summary: NativeHealthSummary) => {
+    setHealthSummary(summary);
+    if (!summary.sleepEntries.length) return;
+    update((current) => {
+      const existingByExternalId = new Map(current.sleepEntries.filter((entry) => entry.externalId).map((entry) => [entry.externalId!, entry]));
+      const imported = summary.sleepEntries.map((entry) => {
+        const existing = entry.externalId ? existingByExternalId.get(entry.externalId) : undefined;
+        return { ...entry, id: existing?.id ?? createId(), createdAt: existing?.createdAt ?? new Date().toISOString() } satisfies SleepEntry;
+      });
+      const importedIds = new Set(imported.map((entry) => entry.externalId));
+      return { ...current, sleepEntries: [...imported, ...current.sleepEntries.filter((entry) => !entry.externalId || !importedIds.has(entry.externalId))].sort((left, right) => right.endedAt.localeCompare(left.endedAt)).slice(0, 180) };
+    });
+  }, [update]);
+
+  useEffect(() => {
+    if (!supportsNativeHealth() || window.localStorage.getItem('vitamate.health.connected') !== 'true') return;
+    void readNativeHealthSummary().then(importHealthSummary).catch(() => undefined);
+  }, [importHealthSummary]);
+
+  useEffect(() => {
+    const resume = () => {
+      void refreshBilling();
+      if (supportsNativeHealth() && window.localStorage.getItem('vitamate.health.connected') === 'true') {
+        void readNativeHealthSummary().then(importHealthSummary).catch(() => undefined);
+      }
+    };
+    window.addEventListener('vitamate:native-resume', resume);
+    return () => window.removeEventListener('vitamate:native-resume', resume);
+  }, [importHealthSummary, refreshBilling]);
 
   useEffect(() => {
     const complete = (event: Event) => {
@@ -301,6 +316,16 @@ export function useVitamate() {
   const addWeight = useCallback((weightKg: number) => {
     const entry: WeightEntry = { id: createId(), weightKg, recordedAt: new Date().toISOString() };
     update((current) => ({ ...current, weightEntries: [entry, ...current.weightEntries] }));
+  }, [update]);
+
+  const addSleep = useCallback((input: Omit<SleepEntry, 'id' | 'createdAt'>) => {
+    const entry: SleepEntry = { ...input, id: createId(), createdAt: new Date().toISOString() };
+    update((current) => ({ ...current, sleepEntries: [entry, ...current.sleepEntries].sort((left, right) => right.endedAt.localeCompare(left.endedAt)).slice(0, 180) }));
+    return entry.id;
+  }, [update]);
+
+  const deleteSleep = useCallback((id: string) => {
+    update((current) => ({ ...current, sleepEntries: current.sleepEntries.filter((entry) => entry.id !== id) }));
   }, [update]);
 
   const saveReminder = useCallback((input: Omit<WellnessReminder, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
@@ -518,21 +543,21 @@ export function useVitamate() {
     try {
       const summary = await readNativeHealthSummary(true);
       window.localStorage.setItem('vitamate.health.connected', 'true');
-      setHealthSummary(summary);
-      setHealthMessage('Apple Health está conectado. Sólo usamos los datos que autorizaste.');
+      importHealthSummary(summary);
+      setHealthMessage('Apple Health está conectado. Importamos únicamente la actividad y el sueño que autorizaste.');
       return summary;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No fue posible conectar Apple Health.';
       setHealthMessage(message); throw error;
     } finally { setHealthBusy(false); }
-  }, []);
+  }, [importHealthSummary]);
 
   const refreshHealth = useCallback(async () => {
     setHealthBusy(true); setHealthMessage('');
-    try { const summary = await readNativeHealthSummary(); setHealthSummary(summary); return summary; }
+    try { const summary = await readNativeHealthSummary(); importHealthSummary(summary); return summary; }
     catch (error) { const message = error instanceof Error ? error.message : 'No fue posible actualizar Apple Health.'; setHealthMessage(message); throw error; }
     finally { setHealthBusy(false); }
-  }, []);
+  }, [importHealthSummary]);
 
   const syncCloud = useCallback(async () => {
     if (!cloudUserId) throw new Error('Primero inicia sesión.');
@@ -599,5 +624,5 @@ export function useVitamate() {
   const billingPeriodActive = !billing?.currentPeriodEnd || Date.parse(billing.currentPeriodEnd) > Date.now();
   const isPremium = billing?.plan === 'premium' && ['active', 'trialing'].includes(billing.status) && billingPeriodActive;
 
-  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, saveReminder, deleteReminder, completeReminder, enableNotifications, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, resendRegistrationCode, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, configured: billingConfigured, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, refresh: refreshBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
+  return { snapshot, completeOnboarding, completePlanSelection, updateProfile, selectMealPlanOption, replaceMealPlanOption, replaceMealPlanIngredient, addMeal, deleteMeal, completeWorkout, completeGuidedWorkout, addManualWorkout, deleteWorkoutSession, addWeight, addSleep, deleteSleep, saveReminder, deleteReminder, completeReminder, enableNotifications, appendCoachMessages, mergeCoachMessages, applyCoachMemoryUpdates, addHealthDocument, savePersonalFood, deletePersonalFood, setLocale, requestMagicLink, requestOtp, registerWithPassword, resendRegistrationCode, signInWithPassword, requestPasswordRecovery, resetPasswordWithOtp, verifyOtp, syncCloud, signOutCloud, deleteAccount, refreshBilling, reconcileCheckout, billing: { entitlement: billing, offers: billingOffers, configured: billingConfigured, busy: billingBusy, message: billingMessage, isPremium, native: nativeBilling, refresh: refreshBilling, purchase: purchaseSubscription, restore: restoreSubscription, manage: openSubscriptionManagement }, health: { supported: supportsNativeHealth(), summary: healthSummary, busy: healthBusy, message: healthMessage, connect: connectHealth, refresh: refreshHealth }, cloud: { configured: supabaseConfigured, email: cloudEmail, userId: cloudUserId, sessionReady, snapshotReady: cloudSnapshotReady, busy: cloudBusy, message: cloudMessage } };
 }

@@ -6,6 +6,29 @@ const foods = new FoodRepository();
 const COMMON_PORTION_GRAMS: Record<string, number> = { apple: 180, banana: 118, egg: 50, 'corn-tortilla': 28, avocado: 150 };
 
 export async function tryDeterministicCoachReply(message: string, currentDateTime: string, timezone: string, locale: 'es-MX' | 'en-US'): Promise<CoachReply | null> {
+  const sleep = extractSleepLog(message);
+  if (sleep) {
+    const endedAt = new Date(currentDateTime);
+    const startedAt = new Date(endedAt.getTime() - sleep.durationMinutes * 60_000);
+    const label = durationLabel(sleep.durationMinutes, locale);
+    return {
+      ...noModelReply(locale === 'en-US' ? `I registered ${label} of sleep.` : `Registré ${label} de sueño.`, 'sleep_log'),
+      action: { type: 'log_sleep', sleep: { startedAt: startedAt.toISOString(), endedAt: endedAt.toISOString(), durationMinutes: sleep.durationMinutes, quality: sleep.quality } },
+    };
+  }
+
+  const workout = extractWorkoutLog(message);
+  if (workout) {
+    const caloriesBurned = Math.round(workout.durationMinutes * workout.kcalPerMinute);
+    const replyMessage = locale === 'en-US'
+      ? `I registered ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} and an estimated ${caloriesBurned} active kcal. You can undo it if needed.`
+      : `Registré ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} y aproximadamente ${caloriesBurned} kcal activas. Puedes deshacerlo si hace falta.`;
+    return {
+      ...noModelReply(replyMessage, 'workout_log'),
+      action: { type: 'log_workout', workout: { title: workout.title, activityType: workout.activityType, occurredAt: new Date(currentDateTime).toISOString(), durationMinutes: workout.durationMinutes, caloriesBurned, perceivedEffort: workout.perceivedEffort } },
+    };
+  }
+
   const lookup = extractLookup(message);
   if (lookup) {
     const food = await bestFood(lookup);
@@ -34,6 +57,52 @@ export async function tryDeterministicCoachReply(message: string, currentDateTim
     ...noModelReply(replyMessage, 'meal_log'),
     action: { type: 'log_meal', meal: { name: `${food.name} · ${Math.round(grams)} g`, mealType, occurredAt, ...macros } },
   };
+}
+
+function extractDurationMinutes(message: string): number | null {
+  const hourMatch = message.match(/(\d+(?:[.,]\d+)?)\s*(?:h|hrs?|horas?)\b/i);
+  const minuteMatch = message.match(/(\d+(?:[.,]\d+)?)\s*(?:min|minutos?)\b/i);
+  const hours = hourMatch ? Number(hourMatch[1].replace(',', '.')) * 60 : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1].replace(',', '.')) : 0;
+  const total = Math.round(hours + minutes);
+  return Number.isFinite(total) && total > 0 ? Math.min(1_440, total) : null;
+}
+
+function extractSleepLog(message: string): { durationMinutes: number; quality?: 1 | 2 | 3 | 4 | 5 } | null {
+  const normalized = message.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!/(dormi|he dormido|descanse|sueno)/.test(normalized)) return null;
+  const durationMinutes = extractDurationMinutes(normalized);
+  if (!durationMinutes || durationMinutes < 30) return null;
+  const quality = /muy bien|excelente|profundo/.test(normalized) ? 5 : /bien|descansad/.test(normalized) ? 4 : /muy mal|pesimo/.test(normalized) ? 1 : /mal|interrumpido/.test(normalized) ? 2 : undefined;
+  return { durationMinutes, quality };
+}
+
+function extractWorkoutLog(message: string): { title: string; durationMinutes: number; activityType: 'strength' | 'cardio' | 'mobility' | 'sport' | 'other'; kcalPerMinute: number; perceivedEffort: number } | null {
+  const normalized = message.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const completed = /(hice|entrene|corri|camine|termine|jugue|practique|nade|pedalee|registre|registrame|registralo|registra)/.test(normalized);
+  const durationMinutes = extractDurationMinutes(normalized);
+  if (!completed || !durationMinutes) return null;
+  const activities = [
+    { pattern: /tenis|tennis/, title: 'Tenis', activityType: 'sport' as const, kcalPerMinute: 7, perceivedEffort: 7 },
+    { pattern: /padel/, title: 'Pádel', activityType: 'sport' as const, kcalPerMinute: 6.5, perceivedEffort: 7 },
+    { pattern: /futbol/, title: 'Fútbol', activityType: 'sport' as const, kcalPerMinute: 8, perceivedEffort: 7 },
+    { pattern: /natacion|nade|nadar/, title: 'Natación', activityType: 'sport' as const, kcalPerMinute: 8, perceivedEffort: 7 },
+    { pattern: /correr|corri|carrera/, title: 'Carrera', activityType: 'cardio' as const, kcalPerMinute: 9, perceivedEffort: 7 },
+    { pattern: /camine|caminar|caminata/, title: 'Caminata', activityType: 'cardio' as const, kcalPerMinute: 4, perceivedEffort: 5 },
+    { pattern: /ciclismo|bici|pedalee/, title: 'Ciclismo', activityType: 'cardio' as const, kcalPerMinute: 7, perceivedEffort: 6 },
+    { pattern: /yoga|movilidad|estiramiento/, title: 'Movilidad', activityType: 'mobility' as const, kcalPerMinute: 3, perceivedEffort: 4 },
+    { pattern: /pesas|fuerza|gym|gimnasio|rutina|entrene/, title: 'Entrenamiento de fuerza', activityType: 'strength' as const, kcalPerMinute: 6, perceivedEffort: 6 },
+  ];
+  const match = activities.find((activity) => activity.pattern.test(normalized));
+  return match ? { ...match, durationMinutes } : null;
+}
+
+function durationLabel(minutes: number, locale: 'es-MX' | 'en-US'): string {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (!hours) return locale === 'en-US' ? `${minutes} minutes` : `${minutes} minutos`;
+  const hourLabel = locale === 'en-US' ? `${hours} ${hours === 1 ? 'hour' : 'hours'}` : `${hours} ${hours === 1 ? 'hora' : 'horas'}`;
+  return remainder ? `${hourLabel} ${remainder} min` : hourLabel;
 }
 
 function extractLookup(message: string): string | null {

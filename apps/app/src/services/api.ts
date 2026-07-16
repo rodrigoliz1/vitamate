@@ -1,4 +1,4 @@
-import type { AppLocale, CoachChatMessage, CoachMemory, CoachMemoryUpdate, FoodCatalogItem, GroceryEstimate, GroceryEstimateRequest, HealthDocumentSummary, MealPlanOption, NutritionTarget, UserProfile, WorkoutSession } from '@vitamate/domain';
+import type { AppLocale, CoachChatMessage, CoachMemory, CoachMemoryUpdate, FoodCatalogItem, GroceryEstimate, GroceryEstimateRequest, HealthDocumentSummary, MealPlanOption, NutritionTarget, SleepEntry, UserProfile, WorkoutSession } from '@vitamate/domain';
 import { supabase } from './supabase';
 
 // Production and native builds must never fall back to loopback: on an iPhone,
@@ -159,6 +159,7 @@ export interface CoachChatContext {
   weightTrend?: { latestKg: number; previousKg: number | null };
   healthDocuments: Array<Pick<HealthDocumentSummary, 'filename' | 'uploadedAt' | 'summary'>>;
   healthSummary?: { stepsToday?: number; restingHeartRate?: number; activeCaloriesToday?: number; source: string };
+  sleepSummary?: { latestMinutes?: number; averageMinutes7Days?: number; recent: Array<Pick<SleepEntry, 'startedAt' | 'endedAt' | 'durationMinutes' | 'quality' | 'source'>> };
   mealPlanContext?: string;
   planChangeTarget?: { type: 'replace_meal' | 'replace_ingredient'; slotId?: string; ingredient?: string };
 }
@@ -166,6 +167,7 @@ export interface CoachChatContext {
 export type CoachAction =
   | { type: 'log_meal'; meal: { name: string; mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack'; occurredAt: string; calories: number; proteinG: number; carbohydratesG: number; fatG: number } }
   | { type: 'log_workout'; workout: { title: string; activityType: 'strength' | 'cardio' | 'mobility' | 'sport' | 'other'; occurredAt: string; durationMinutes: number; caloriesBurned: number; perceivedEffort: number } }
+  | { type: 'log_sleep'; sleep: { startedAt: string; endedAt: string; durationMinutes: number; quality?: 1 | 2 | 3 | 4 | 5; note?: string } }
   | { type: 'replace_plan_meal'; change: { slotId: string; option: MealPlanOption } }
   | { type: 'replace_plan_ingredient'; change: { slotId?: string; ingredientToReplace: string; replacementIngredient: string } };
 

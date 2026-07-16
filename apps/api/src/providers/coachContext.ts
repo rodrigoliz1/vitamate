@@ -1,14 +1,18 @@
 import type { CoachAttachment, CoachContext, CoachLongTermMemory } from './openaiCoach.js';
 
-export type CoachTask = 'general' | 'nutrition' | 'meal_log' | 'training' | 'workout_log' | 'progress' | 'health' | 'plan_change';
+export type CoachTask = 'general' | 'nutrition' | 'meal_log' | 'training' | 'workout_log' | 'sleep_log' | 'progress' | 'health' | 'plan_change';
 
 const normalize = (value: string) => value.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 export function classifyCoachTask(message: string, attachment: CoachAttachment = {}): CoachTask {
   const text = normalize(message);
-  if (attachment.document || /laboratorio|analisis|estudio|documento|pdf|glucosa|colesterol|sangre|lesion|dolor|mareo|cansad|dormi|sueno|estres|enferm/.test(text)) return 'health';
+  if (/(?:dormi|descanse|he dormido).*(?:minut|hora)|(?:registra|registrame|registralo|agrega|anade).*(?:sueno|descanso|dormi)/.test(text)) return 'sleep_log';
+  if (attachment.document || /laboratorio|analisis|estudio|documento|pdf|glucosa|colesterol|sangre|lesion|dolor|mareo|cansad|sueno|estres|enferm/.test(text)) return 'health';
   if (/cambia|reemplaza|sustituye|intercambia/.test(text) && /plan|menu|comida|ingrediente|desayuno|cena|colacion/.test(text)) return 'plan_change';
-  if (/(registra|agrega|anade).*(entren|actividad|correr|camin|pesas|gym|ejercicio)|(?:hice|entrene|corri|camine|termine).*(minut|hora|km|rutina|ejercicio)/.test(text)) return 'workout_log';
+  const activityWord = /entren|actividad|correr|corri|camin|pesas|gym|ejercicio|tenis|tennis|padel|futbol|natacion|nadar|ciclismo|bici|yoga|pilates|deporte/;
+  const actionWord = /registra|registrame|registralo|agrega|anade/;
+  const completedActivity = /hice|entrene|corri|camine|termine|jugue|practique|nade|pedalee/;
+  if ((actionWord.test(text) && activityWord.test(text)) || (completedActivity.test(text) && (activityWord.test(text) || /minut|hora|km/.test(text)))) return 'workout_log';
   if (/^(?:registrame|registra|agregame|agrega|anade)\b/.test(text) || /\b(?:ya\s+)?(?:me\s+)?(?:comi|desayune|almorce|cene|tome|bebi)\b/.test(text)) return 'meal_log';
   if (/calori|proteina|carbohidr|grasa|macro|comida|alimento|receta|desayuno|cena|colacion|hambre|dieta|nutric|foto de alimento/.test(text)) return 'nutrition';
   if (/entren|ejercicio|rutina|serie|repeticion|sentadilla|press|correr|caminar|gym|fuerza|cardio|movilidad/.test(text)) return 'training';
@@ -65,10 +69,11 @@ export function compactCoachContext(context: CoachContext, task: CoachTask): Rec
       week: context.weeklyWorkout,
     };
   }
-  if (task === 'health') {
+  if (task === 'health' || task === 'sleep_log') {
     base.health = {
       healthSummary: context.healthSummary,
-      documents: context.healthDocuments.slice(0, 3).map((document) => ({ ...document, summary: document.summary.slice(0, 1200) })),
+      sleep: context.sleepSummary,
+      ...(task === 'health' ? { documents: context.healthDocuments.slice(0, 3).map((document) => ({ ...document, summary: document.summary.slice(0, 1200) })) } : {}),
     };
   }
   if (task === 'plan_change' && context.mealPlanContext) {
@@ -99,6 +104,7 @@ export function compactRealtimeCoachContext(context: CoachContext): Record<strin
     },
     weightTrend: context.weightTrend,
     healthSummary: context.healthSummary,
+    sleepSummary: context.sleepSummary,
     ...(context.mealPlanContext ? { currentMealPlan: compactMealPlan(context.mealPlanContext) } : {}),
   };
 }
@@ -111,6 +117,7 @@ export function selectRelevantMemories(message: string, task: CoachTask, memorie
     meal_log: new Set(['preference', 'goal', 'constraint', 'health_context']),
     training: new Set(['goal', 'routine', 'constraint', 'health_context']),
     workout_log: new Set(['goal', 'routine', 'constraint', 'health_context']),
+    sleep_log: new Set(['routine', 'health_context', 'constraint']),
     progress: new Set(['goal', 'routine', 'motivation', 'constraint']),
     health: new Set(['health_context', 'constraint', 'routine']),
     plan_change: new Set(['preference', 'goal', 'constraint', 'health_context']),

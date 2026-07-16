@@ -31,6 +31,13 @@ async function persistNormalizedHistory(userId: string, snapshot: VitamateSnapsh
   }));
   if (weights.length) { const { error } = await supabase.from('weight_entries').upsert(weights); if (error) throw error; }
 
+  const sleepEntries = snapshot.sleepEntries.filter((entry) => uuidPattern.test(entry.id)).map((entry) => ({
+    id: entry.id, user_id: userId, started_at: entry.startedAt, ended_at: entry.endedAt,
+    duration_minutes: entry.durationMinutes, source: entry.source, quality: entry.quality ?? null,
+    note: entry.note ?? null, external_id: entry.externalId ?? null, stages: entry.stages ?? {}, created_at: entry.createdAt,
+  }));
+  if (sleepEntries.length) { const { error } = await supabase.from('sleep_entries').upsert(sleepEntries); if (error) throw error; }
+
   const coachMessages = snapshot.coachMessages.filter((message) => uuidPattern.test(message.id)).map((message) => ({
     id: message.id, user_id: userId, role: message.role, content: message.content, created_at: message.createdAt,
   }));
@@ -84,7 +91,7 @@ export async function reconcileCloudSnapshot(userId: string, local: VitamateSnap
   const remote = remoteData.appSnapshot;
   const localTime = new Date(local.cloudUpdatedAt ?? local.profile.completedAt).getTime();
   const remoteTime = new Date(remoteData.snapshotUpdatedAt ?? data?.updated_at ?? 0).getTime();
-  if (remote && [3, 4, 5].includes(remote.schemaVersion ?? 0) && remoteTime > localTime) return {
+  if (remote && [3, 4, 5, 6].includes(remote.schemaVersion ?? 0) && remoteTime > localTime) return {
     snapshot: normalizeVitamateSnapshot(remote),
     direction: 'downloaded',
   };
@@ -118,7 +125,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<VitamateSnapsh
   if (error) throw error;
   const remoteData = (data?.profile_data ?? {}) as RemoteProfileData;
   const remote = remoteData.appSnapshot;
-  return remote && [3, 4, 5].includes(remote.schemaVersion ?? 0)
+  return remote && [3, 4, 5, 6].includes(remote.schemaVersion ?? 0)
     ? normalizeVitamateSnapshot(remote)
     : null;
 }
