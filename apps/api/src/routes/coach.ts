@@ -144,7 +144,12 @@ export async function coachRoutes(app: FastifyInstance) {
     if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para recuperar tu conversación.' });
     await requirePremium(userId);
     const query = historyQuerySchema.parse(request.query);
-    return { messages: await listCoachMessages(userId, query.limit, query.before) };
+    try {
+      return { messages: await listCoachMessages(userId, query.limit, query.before), persisted: true };
+    } catch (error) {
+      request.log.error({ error, userId }, 'No fue posible cargar el historial remoto de VITACOACH; se continuará con el historial local.');
+      return { messages: [], persisted: false };
+    }
   });
 
   app.post('/v1/coach/chat', async (request, reply) => {
@@ -277,7 +282,12 @@ export async function coachRoutes(app: FastifyInstance) {
     if (!config.OPENAI_API_KEY) return reply.code(503).send({ code: 'REALTIME_NOT_CONFIGURED', message: 'La llamada Realtime todavía no está configurada.' });
     if (!await allowPersistentRequest(`realtime:${userId}`, 8)) return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera un momento antes de iniciar otra llamada.' });
     const context = realtimeSchema.parse(request.body);
-    const durableState = userId ? await loadCoachState(userId, 8) : null;
+    let durableState = null;
+    try {
+      durableState = await loadCoachState(userId, 8);
+    } catch (error) {
+      request.log.error({ error, userId }, 'No fue posible cargar la memoria remota de VITACOACH; la llamada continuará con el contexto local.');
+    }
     const safetyIdentifier = createHash('sha256').update(`vitamate:${userId ?? request.ip}`).digest('hex');
     const realtimeContext = compactRealtimeCoachContext(context);
     const realtimeMemory = selectRelevantMemories('', 'progress', durableState?.memories ?? [])

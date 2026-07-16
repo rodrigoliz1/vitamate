@@ -429,6 +429,9 @@ function realtimeToolAction(name: string, rawArguments: string): CoachAction {
 }
 
 function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { open: boolean; english: boolean; getContext(): CoachChatContext; onClose(): void; onAction(action: CoachAction): { success: true; message: string } | Promise<{ success: true; message: string }>; onEnded(event: { durationSeconds: number; startedAt: string; endedAt: string; usage: RealtimeCallUsage }): void | Promise<void> }) {
+  const connectionFailureMessage = english
+    ? 'The call could not connect with VITACOACH. Try again.'
+    : 'No se logró enlazar la llamada con VITACOACH. Intentalo de nuevo';
   const [listening, setListening] = useState(false);
   const [callActive, setCallActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -436,7 +439,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
   const [callSeconds, setCallSeconds] = useState(0);
   const [connectionError, setConnectionError] = useState(false);
   const [requiresSecureContext, setRequiresSecureContext] = useState(false);
-  const [status, setStatus] = useState(english ? 'Connecting with Marin…' : 'Conectando con Marin…');
+  const [status, setStatus] = useState(english ? 'Connecting with VITACOACH…' : 'Conectando con VITACOACH…');
   const activeRef = useRef(false);
   const speakingRef = useRef(false);
   const mutedRef = useRef(false);
@@ -494,14 +497,14 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
     setConnectionError(false);
     setRequiresSecureContext(false);
     setCallActive(true);
-    setStatus(english ? 'Connecting with Marin…' : 'Conectando con Marin…');
+    setStatus(english ? 'Connecting with VITACOACH…' : 'Conectando con VITACOACH…');
     playConnectionTone();
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
       activeRef.current = false;
       setCallActive(false);
       setConnectionError(true);
       setRequiresSecureContext(true);
-      setStatus(english ? 'Voice calls on iPhone require a secure HTTPS connection.' : 'Las llamadas en iPhone requieren una conexión HTTPS segura.');
+      setStatus(connectionFailureMessage);
       return;
     }
     try {
@@ -523,7 +526,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
         void audio.play().catch(() => {
           if (!activeRef.current) return;
           setConnectionError(true);
-          setStatus(english ? 'Audio playback was blocked. Retry the call.' : 'El dispositivo bloqueó el audio. Reintenta la llamada.');
+          setStatus(connectionFailureMessage);
         });
       };
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -539,7 +542,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
         setListening(false);
         speakingRef.current = true;
         setSpeaking(true);
-        setStatus(english ? 'Marin is answering…' : 'Marin está contestando…');
+        setStatus(english ? 'VITACOACH is answering…' : 'VITACOACH está contestando…');
         const preferredName = callContext.profile.preferredName.trim().slice(0, 60);
         const greeting = english
           ? `Hi ${preferredName || 'there'}, how can I help you today?`
@@ -557,7 +560,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
       channel.onerror = () => {
         if (!activeRef.current) return;
         setConnectionError(true);
-        setStatus(english ? 'The call channel was interrupted.' : 'Se interrumpió el canal de la llamada.');
+        setStatus(connectionFailureMessage);
       };
       const resolveToolCall = async (callId: string, name: string, rawArguments: string) => {
         if (completedToolCallsRef.current.has(callId)) return;
@@ -595,13 +598,13 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
             setConnectionError(true);
             setSpeaking(false);
             speakingRef.current = false;
-            setStatus(payload.error?.message || (english ? 'Marin could not answer this call.' : 'Marin no pudo responder esta llamada.'));
+            setStatus(connectionFailureMessage);
           }
           if (payload.type === 'session.created' || payload.type === 'session.updated') {
             const activeVoice = payload.session?.audio?.output?.voice;
             if (activeVoice && activeVoice !== 'marin') {
               setConnectionError(true);
-              setStatus(english ? 'The Marin voice was not available.' : 'La voz Marin no quedó disponible.');
+              setStatus(connectionFailureMessage);
             }
           }
           if (payload.type === 'input_audio_buffer.speech_started') {
@@ -614,7 +617,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
             setListening(false);
             setSpeaking(true);
             speakingRef.current = true;
-            setStatus(english ? 'Marin is speaking…' : 'Marin está respondiendo…');
+            setStatus(english ? 'VITACOACH is speaking…' : 'VITACOACH está respondiendo…');
             void audio.play().catch(() => undefined);
           }
           if (payload.type === 'response.done') {
@@ -638,7 +641,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
         if (peer.connectionState === 'connected') setConnectionError(false);
         if (['failed', 'disconnected'].includes(peer.connectionState) && activeRef.current) {
           setConnectionError(true);
-          setStatus(english ? 'The call was disconnected.' : 'La llamada se desconectó.');
+          setStatus(connectionFailureMessage);
         }
       };
       const offer = await peer.createOffer();
@@ -648,7 +651,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
       const answerSdp = await response.text();
       if (!activeRef.current) { peer.close(); return; }
       await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    } catch (error) {
+    } catch {
       if (!activeRef.current) return;
       peerRef.current?.close();
       peerRef.current = null;
@@ -658,8 +661,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
       setSpeaking(false);
       speakingRef.current = false;
       setConnectionError(true);
-      const detail = error instanceof Error ? error.message : '';
-      setStatus(english ? `We could not connect with Marin.${detail ? ` ${detail}` : ''}` : `No pudimos conectar con Marin.${detail ? ` ${detail}` : ''}`);
+      setStatus(connectionFailureMessage);
     }
   };
   const toggleMute = () => {
@@ -671,7 +673,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
       setListening(false); setStatus(english ? 'Microphone muted' : 'Micrófono silenciado');
     } else {
       setListening(!speakingRef.current);
-      setStatus(speakingRef.current ? (english ? 'Marin is speaking…' : 'Marin está respondiendo…') : (english ? 'Listening…' : 'Escuchando…'));
+      setStatus(speakingRef.current ? (english ? 'VITACOACH is speaking…' : 'VITACOACH está respondiendo…') : (english ? 'Listening…' : 'Escuchando…'));
     }
   };
   const stop = () => {
@@ -699,7 +701,7 @@ function VoiceCall({ open, english, getContext, onClose, onAction, onEnded }: { 
     stop(); onClose();
   };
   const activityStatus = muted ? (english ? 'Microphone muted' : 'Micrófono silenciado') : status;
-  return <IonModal isOpen={open} onWillPresent={() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); }} onDidPresent={() => { closeButtonRef.current?.focus(); void startCall(); }} onDidDismiss={close} className="voice-call-modal"><div className="voice-call"><audio ref={audioRef} className="voice-remote-audio" autoPlay playsInline aria-hidden="true" onPlaying={() => { if (!activeRef.current) return; setConnectionError(false); setRequiresSecureContext(false); }} /><button ref={closeButtonRef} className="voice-close" aria-label={english ? 'End call' : 'Finalizar llamada'} onClick={close}><IonIcon icon={closeOutline} /></button><div className={`voice-orb${speaking ? ' is-speaking' : listening ? ' is-listening' : callActive ? ' is-connecting' : ''}`}><span>VC</span></div><p className="eyebrow">VITACOACH · MARIN</p><h2>{english ? 'Voice call' : 'Llamada de voz'}</h2><p className={`voice-timer${connectionError ? ' is-error' : ''}`}>{requiresSecureContext ? 'HTTPS requerido' : connectionError ? (english ? 'Connection error' : 'Error de conexión') : formatCallDuration(callSeconds)}</p><p className="voice-status" aria-live="polite">{activityStatus}</p>{connectionError && !requiresSecureContext && <button type="button" className="voice-retry" onClick={retry}><IonIcon icon={refreshOutline} />{english ? 'Retry with Marin' : 'Reintentar con Marin'}</button>}<button className={`voice-mic${muted ? ' is-muted' : ' is-live'}`} aria-label={muted ? (english ? 'Unmute microphone' : 'Activar micrófono') : (english ? 'Mute microphone' : 'Silenciar micrófono')} aria-pressed={muted} disabled={!callActive || connectionError} onClick={toggleMute}><IonIcon icon={muted ? micOffOutline : micOutline} /></button></div></IonModal>;
+  return <IonModal isOpen={open} onWillPresent={() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); }} onDidPresent={() => { closeButtonRef.current?.focus(); void startCall(); }} onDidDismiss={close} className="voice-call-modal"><div className="voice-call"><audio ref={audioRef} className="voice-remote-audio" autoPlay playsInline aria-hidden="true" onPlaying={() => { if (!activeRef.current) return; setConnectionError(false); setRequiresSecureContext(false); }} /><button ref={closeButtonRef} className="voice-close" aria-label={english ? 'End call' : 'Finalizar llamada'} onClick={close}><IonIcon icon={closeOutline} /></button><div className={`voice-orb${speaking ? ' is-speaking' : listening ? ' is-listening' : callActive ? ' is-connecting' : ''}`}><span>VC</span></div><p className="eyebrow">VITACOACH</p><h2>{english ? 'Voice call' : 'Llamada de voz'}</h2><p className={`voice-timer${connectionError ? ' is-error' : ''}`}>{requiresSecureContext ? 'HTTPS requerido' : connectionError ? (english ? 'Connection error' : 'Error de conexión') : formatCallDuration(callSeconds)}</p><p className="voice-status" aria-live="polite">{activityStatus}</p>{connectionError && !requiresSecureContext && <button type="button" className="voice-retry" onClick={retry}><IonIcon icon={refreshOutline} />{english ? 'Retry with VITACOACH' : 'Reintentar con VITACOACH'}</button>}<button className={`voice-mic${muted ? ' is-muted' : ' is-live'}`} aria-label={muted ? (english ? 'Unmute microphone' : 'Activar micrófono') : (english ? 'Mute microphone' : 'Silenciar micrófono')} aria-pressed={muted} disabled={!callActive || connectionError} onClick={toggleMute}><IonIcon icon={muted ? micOffOutline : micOutline} /></button></div></IonModal>;
 }
 
 export default Coach;
