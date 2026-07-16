@@ -123,8 +123,9 @@ export function useVitamate() {
     try {
       const result = await fetchBillingStatus();
       setBilling(result.entitlement);
-      setVoiceBalance(result.voiceBalance);
-      const [offers, callOffers] = await Promise.all([loadBillingOffers(result.offers).catch(() => (nativeBilling ? [] : result.offers)), loadVoiceOffers(result.voiceOffers).catch(() => result.voiceOffers)]);
+      setVoiceBalance(result.voiceBalance ?? null);
+      const serverVoiceOffers = result.voiceOffers ?? [];
+      const [offers, callOffers] = await Promise.all([loadBillingOffers(result.offers).catch(() => (nativeBilling ? [] : result.offers)), loadVoiceOffers(serverVoiceOffers).catch(() => serverVoiceOffers)]);
       setBillingOffers(offers);
       setVoiceOffers(callOffers);
       setBillingConfigured(nativeBilling ? offers.length > 0 : result.configured);
