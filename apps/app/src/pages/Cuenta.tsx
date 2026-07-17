@@ -65,7 +65,7 @@ const Cuenta = ({ snapshot, cloudEmail, entitlement, voiceBalance, voiceOffers, 
                 </div>
                 <IonIcon className="account-chevron" icon={chevronForward} />
               </header>
-              <p>{premium ? (entitlement?.status === 'trialing' ? 'Tu prueba de siete días está activa.' : `Tu acceso Premium está vigente y verificado por ${entitlement?.source === 'apple' ? 'App Store' : 'Stripe'}.`) : 'Macros, búsqueda, código de barras y alimentos personales.'}</p>
+              <p>{premium ? (entitlement?.status === 'trialing' ? (entitlement.source === 'none' ? 'Tu regalo Premium de cinco días está activo.' : 'Tu prueba Premium está activa.') : `Tu acceso Premium está vigente y verificado por ${entitlement?.source === 'apple' ? 'App Store' : 'Stripe'}.`) : 'Nutrición, registro de alimentos y entrenamientos completos.'}</p>
               <span className="account-status">{premium ? 'Administrar plan' : 'Ver Premium'}</span>
             </button>
             {premium && (

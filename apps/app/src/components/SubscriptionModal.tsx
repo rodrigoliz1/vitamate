@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { IonButton, IonIcon, IonModal, IonSpinner } from '@ionic/react';
-import { barbellOutline, cameraOutline, chatbubblesOutline, checkmarkCircle, closeOutline, restaurantOutline, sparklesOutline } from 'ionicons/icons';
+import { analyticsOutline, cameraOutline, chatbubblesOutline, checkmarkCircle, closeOutline, restaurantOutline, sparklesOutline } from 'ionicons/icons';
 import type { BillingEntitlement, BillingOffer } from '../services/api';
 
 interface Props {
@@ -51,7 +51,7 @@ export function SubscriptionModal({ isOpen, onDismiss, entitlement, offers, conf
   return <IonModal isOpen={isOpen} onDidDismiss={onDismiss} className="subscription-modal"><div className="subscription-shell">
     <button className="subscription-close" aria-label="Cerrar" onClick={onDismiss}><IonIcon icon={closeOutline} /></button>
     <header><span><IonIcon icon={sparklesOutline} /></span><p className="eyebrow">VITAMATE Premium</p><h2>{premium ? 'Tu mejor versión está en marcha' : 'Todo tu plan. Un solo compañero.'}</h2><p>{premium ? subscriptionStatus(entitlement) : 'Elige el plan que mejor encaja contigo y convierte tus datos en un acompañamiento que aprende contigo.'}</p></header>
-    <div className="premium-benefits"><Benefit icon={chatbubblesOutline} text="VITACOACH por chat y llamada" /><Benefit icon={cameraOutline} text="Análisis de alimentos por fotografía" /><Benefit icon={barbellOutline} text="Entrenamientos guiados y progresivos" /><Benefit icon={restaurantOutline} text="Plan alimenticio, súper y costos" /></div>
+    <div className="premium-benefits"><Benefit icon={chatbubblesOutline} text="VITACOACH por chat y llamada" /><Benefit icon={cameraOutline} text="Análisis de alimentos por fotografía" /><Benefit icon={analyticsOutline} text="Progreso, tendencias y personalización" /><Benefit icon={restaurantOutline} text="Plan alimenticio, súper y costos" /></div>
     {premium ? <div className="current-plan-panel"><strong>{promotional ? 'Prueba Premium de regalo' : `Plan Premium ${entitlement.billingInterval === 'year' ? 'anual' : 'mensual'}`}</strong><span>{promotional ? 'Acceso completo hasta' : entitlement.cancelAtPeriodEnd ? 'Termina' : 'Próxima renovación'}: {formatDate(entitlement.currentPeriodEnd)}</span>{promotional ? <small>Sin tarjeta, cargos ni renovación automática.</small> : <IonButton expand="block" className="primary-button" disabled={busy !== null} onClick={portal}>{busy === 'portal' ? <IonSpinner /> : webPurchase && native ? 'Plan adquirido en vitamate.mx' : `Administrar en ${native || entitlement.source === 'apple' ? 'App Store' : 'Stripe'}`}</IonButton>}</div> : <div className="subscription-options">
       <PlanButton interval="year" label="Premium anual" badge="Mejor elección" offer={offers.find((item) => item.interval === 'year')} busy={busy} onClick={start} />
       <PlanButton interval="month" label="Premium mensual" offer={offers.find((item) => item.interval === 'month')} busy={busy} onClick={start} />
@@ -62,7 +62,7 @@ export function SubscriptionModal({ isOpen, onDismiss, entitlement, offers, conf
     {!premium && !loading && statusMessage && <div className="billing-connection-error" role="alert"><strong>No pudimos verificar Premium</strong><span>{statusMessage}</span>{onRefresh && <button type="button" onClick={refresh}>Reintentar conexión</button>}</div>}
     {!premium && !loading && !statusMessage && configured === false && <div className="billing-connection-error" role="status"><strong>Catálogo temporalmente no disponible</strong><span>Tu cuenta sí está conectada, pero el servidor de pagos todavía no devolvió los planes.</span>{onRefresh && <button type="button" onClick={refresh}>Actualizar</button>}</div>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    {!premium && <button className="free-plan-link" onClick={onDismiss}>Continuar con Gratis · sólo contador de macros</button>}
+    {!premium && <button className="free-plan-link" onClick={onDismiss}>Continuar con Gratis · nutrición y entrenamientos</button>}
     <p className="subscription-legal">La suscripción se renueva automáticamente salvo cancelación. El cobro y la administración se realizan con el proveedor de la plataforma. <a href="https://vitamate.mx/terminos" target="_blank" rel="noreferrer">Términos de uso</a> · <a href="https://vitamate.mx/privacidad" target="_blank" rel="noreferrer">Aviso de privacidad</a></p>
   </div></IonModal>;
 }

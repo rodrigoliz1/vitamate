@@ -10,12 +10,13 @@ interface Props {
   endsAt?: string | null;
   busy?: boolean;
   message?: string;
+  onPresented?(): void;
   onDismiss(): void;
   onClaim(): Promise<void>;
   onSubscribe(): void;
 }
 
-export function PromoTrialModal({ isOpen, notice, preferredName, endsAt, busy = false, message = '', onDismiss, onClaim, onSubscribe }: Props) {
+export function PromoTrialModal({ isOpen, notice, preferredName, endsAt, busy = false, message = '', onPresented, onDismiss, onClaim, onSubscribe }: Props) {
   const gift = notice === 'gift';
   const expired = notice === 'expired';
   const reminder = !gift && !expired;
@@ -36,7 +37,7 @@ export function PromoTrialModal({ isOpen, notice, preferredName, endsAt, busy = 
       : 'Aprovecha cada función hasta el último momento. Tu prueba terminará automáticamente y no se realizará ningún cargo.';
 
   return (
-    <IonModal isOpen={isOpen} onDidDismiss={onDismiss} backdropDismiss={!busy} className="promo-trial-modal">
+    <IonModal isOpen={isOpen} onDidPresent={onPresented} onDidDismiss={onDismiss} backdropDismiss={!busy} className="promo-trial-modal">
       <section className={`promo-trial-shell promo-trial-shell--${notice}`} aria-labelledby="promo-trial-title">
         <button type="button" className="promo-trial-close" aria-label="Cerrar" disabled={busy} onClick={onDismiss}>
           <IonIcon icon={closeOutline} />

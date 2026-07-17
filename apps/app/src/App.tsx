@@ -87,6 +87,7 @@ const App: React.FC = () => {
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
   const [celebration, setCelebration] = useState<BillingEntitlement | null>(null);
   const [promoNotice, setPromoNotice] = useState<PromoTrialNotice | null>(null);
+  const [promoPresentation, setPromoPresentation] = useState<{ key: string; storage: 'session' | 'local' } | null>(null);
   const [promoError, setPromoError] = useState('');
   const handledCheckout = useRef<string | null>(null);
   const handledVoiceCheckout = useRef<string | null>(null);
@@ -180,30 +181,52 @@ const App: React.FC = () => {
       .catch(() => undefined);
   }, [actions.cloud.email, actions.reconcileVoiceCheckout]);
   useEffect(() => {
+    const userId = actions.cloud.userId;
+    if (!userId || !snapshot.profile || !snapshot.planSelectionCompleted || actions.billing.promoTrial) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempt = 0;
+    const delays = [250, 1_000, 2_500];
+    const retry = () => {
+      timer = window.setTimeout(() => {
+        void actions.refreshBilling().finally(() => {
+          attempt += 1;
+          if (!cancelled && attempt < delays.length) retry();
+        });
+      }, delays[attempt]);
+    };
+    retry();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [actions.billing.promoTrial, actions.cloud.userId, actions.refreshBilling, snapshot.planSelectionCompleted, snapshot.profile]);
+  useEffect(() => {
     const promo = actions.billing.promoTrial;
     const userId = actions.cloud.userId;
     if (!userId || !snapshot.profile || !snapshot.planSelectionCompleted || !promo || promoNotice || subscriptionOpen || celebration) return;
 
     let notice: PromoTrialNotice | null = null;
-    let storage: Storage = window.sessionStorage;
+    let storage: 'session' | 'local' = 'session';
     let key = '';
     if (promo.state === 'available' && promo.eligible) {
       notice = 'gift';
-      key = `vitamate.promo.gift:${userId}`;
+      key = `vitamate.promo.gift:v2:${userId}`;
     } else if (promo.state === 'active' && promo.endsAt) {
       const remainingCalendarDays = calendarDaysUntil(promo.endsAt);
       if (remainingCalendarDays === 2) notice = 'two_days';
       else if (remainingCalendarDays === 1) notice = 'one_day';
       else if (remainingCalendarDays === 0) notice = 'today';
-      storage = window.localStorage;
+      storage = 'local';
       key = notice ? `vitamate.promo.reminder:${userId}:${promo.endsAt}:${notice}` : '';
     } else if (promo.state === 'expired' && !actions.billing.isPremium) {
       notice = 'expired';
       key = `vitamate.promo.expired:${userId}:${promo.endsAt ?? 'used'}`;
     }
-    if (!notice || !key || storage.getItem(key)) return;
-    storage.setItem(key, new Date().toISOString());
+    const targetStorage = storage === 'local' ? window.localStorage : window.sessionStorage;
+    if (!notice || !key || targetStorage.getItem(key)) return;
     setPromoError('');
+    setPromoPresentation({ key, storage });
     setPromoNotice(notice);
   }, [actions.billing.isPremium, actions.billing.promoTrial, actions.cloud.userId, celebration, promoNotice, snapshot.planSelectionCompleted, snapshot.profile, subscriptionOpen]);
   if (!actions.cloud.sessionReady) return <AppBootScreen />;
@@ -257,10 +280,10 @@ const App: React.FC = () => {
       <IonReactRouter>
         <IonTabs>
           <IonRouterOutlet>
-            <Route exact path="/hoy" render={() => <Hoy snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} />} />
+            <Route exact path="/hoy" render={() => <Hoy snapshot={snapshot} isPremium={premium} />} />
             <Route exact path="/nutricion" render={() => <Nutricion snapshot={snapshot} isPremium={premium} onRequestPremium={requirePremium} onAddMeal={actions.addMeal} onUpdateMeal={actions.updateMeal} onDeleteMeal={actions.deleteMeal} onSavePersonalFood={actions.savePersonalFood} onDeletePersonalFood={actions.deletePersonalFood} onSelectMealPlanOption={actions.selectMealPlanOption} />} />
             <Route exact path="/plan-semanal" render={() => gated('Plan alimenticio y lista semanal del súper', <PlanSemanal snapshot={snapshot} onUpdateProfile={actions.updateProfile} onSelectMealPlanOption={actions.selectMealPlanOption} />)} />
-            <Route exact path="/entrenar" render={() => gated('Entrenamientos personalizados y progresivos', <Entrenar snapshot={snapshot} onCompleteWorkout={actions.completeGuidedWorkout} onUpdateWorkout={actions.updateWorkoutSession} onDeleteWorkout={actions.deleteWorkoutSession} />)} />
+            <Route exact path="/entrenar" render={() => <Entrenar snapshot={snapshot} onCompleteWorkout={actions.completeGuidedWorkout} onUpdateWorkout={actions.updateWorkoutSession} onDeleteWorkout={actions.deleteWorkoutSession} />} />
             <Route
               exact
               path="/coach"
@@ -285,10 +308,9 @@ const App: React.FC = () => {
               <IonIcon icon={restaurant} />
               <IonLabel>{english ? 'Nutrition' : 'Nutrición'}</IonLabel>
             </IonTabButton>
-            <IonTabButton tab="entrenar" href={premium ? '/entrenar' : undefined} onClick={premium ? undefined : requirePremium}>
+            <IonTabButton tab="entrenar" href="/entrenar">
               <IonIcon icon={barbell} />
               <IonLabel>{english ? 'Train' : 'Entrenar'}</IonLabel>
-              {!premium && <IonIcon className="tab-lock" icon={lockClosed} />}
             </IonTabButton>
             <IonTabButton tab="coach" href={premium ? '/coach' : undefined} onClick={premium ? undefined : requirePremium} className="vitacoach-tab">
               <IonIcon icon={chatbubbles} />
@@ -311,17 +333,23 @@ const App: React.FC = () => {
             endsAt={actions.billing.promoTrial?.endsAt}
             busy={actions.billing.busy}
             message={promoError}
-            onDismiss={() => { setPromoError(''); setPromoNotice(null); }}
+            onPresented={() => {
+              if (!promoPresentation) return;
+              const storage = promoPresentation.storage === 'local' ? window.localStorage : window.sessionStorage;
+              storage.setItem(promoPresentation.key, new Date().toISOString());
+            }}
+            onDismiss={() => { setPromoError(''); setPromoNotice(null); setPromoPresentation(null); }}
             onClaim={async () => {
               try {
                 const entitlement = await actions.billing.claimPromotionalTrial();
                 setPromoNotice(null);
+                setPromoPresentation(null);
                 setCelebration(entitlement);
               } catch (error) {
                 setPromoError(error instanceof Error ? error.message : 'No fue posible activar tu regalo Premium.');
               }
             }}
-            onSubscribe={() => { setPromoNotice(null); setSubscriptionOpen(true); }}
+            onSubscribe={() => { setPromoNotice(null); setPromoPresentation(null); setSubscriptionOpen(true); }}
           />
         )}
         {celebration && <SubscriptionCelebration entitlement={celebration} isOpen onDismiss={() => setCelebration(null)} />}

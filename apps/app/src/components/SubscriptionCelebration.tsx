@@ -29,7 +29,7 @@ export function SubscriptionCelebration({ entitlement, isOpen, onDismiss }: { en
         <article><small>{isTrial ? 'Prueba sin costo hasta' : entitlement.cancelAtPeriodEnd ? 'Tu acceso termina' : 'Próxima facturación'}</small><strong>{formatDate(nextDate)}</strong></article>
         <article><small>Estado</small><strong>{isTrial ? 'Prueba Premium activa' : entitlement.cancelAtPeriodEnd ? 'Cancelación programada' : 'Acceso Premium activo'}</strong></article>
       </div>
-      <p className="celebration-note"><IonIcon icon={sparkles} /> VITACOACH, tu plan y tus entrenamientos ya están listos para acompañarte.</p>
+      <p className="celebration-note"><IonIcon icon={sparkles} /> VITACOACH, tu plan y tu progreso ya están listos para acompañarte.</p>
       <IonButton expand="block" className="primary-button celebration-button" onClick={onDismiss}>Comenzar mi camino</IonButton>
     </section>
   </IonModal>;
