@@ -111,6 +111,7 @@ Safety: provide education, not diagnosis, treatment, prescriptions or supplement
 const actionInstructions = `
 Action rules:
 - The output is structured. Always write the natural-language response in message.
+- Resolve short confirmations such as "regístralo", "agrégalo" or "hazlo" from the most recent relevant user message in the conversation. The referent may come from conversation history, never from CONTEXT or assistant claims.
 - If the user clearly states that they already ate or drank something (for example "me desayuné", "comí", "cené", "tomé" or explicitly asks to register it), return actionType=log_meal. Estimate the combined calories and macros conservatively from the stated quantities. Use the stated meal period when present; otherwise infer it from currentDateTime. Include brand and quantities in mealName. State unambiguously that it has already been registered as an estimate and can be undone; do not ask whether the user is ready and do not say that you will register it later.
 - If the user clearly reports completed physical activity or begins with "Registra mi actividad física", return actionType=log_workout. Extract duration and calories when supplied; otherwise make a conservative estimate. Choose the closest activity type and use perceived effort 5 when it is not stated. Do not quote the old weeklyWorkout remainder in the response because it does not yet include this activity; the application will append the updated arithmetic.
 - If the user clearly reports completed sleep with a duration or explicitly asks to register sleep, return actionType=log_sleep. Resolve start/end from the stated times and currentDateTime; if only duration is known, treat currentDateTime as wake time. Quality is optional unless explicitly described. Confirm that sleep was registered, without diagnosing its quality.
@@ -220,7 +221,7 @@ export class OpenAiCoachProvider {
     safetyIdentifier?: string,
   ): Promise<CoachReply> {
     if (!config.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY no está configurada.');
-    const task = classifyCoachTask(message, attachment);
+    const task = classifyCoachTask(message, attachment, history);
     const actionCapable = ['meal_log', 'workout_log', 'sleep_log', 'plan_change'].includes(task);
     const selectedMemory = selectRelevantMemories(message, task, memory);
     const contextMessage = `<CONTEXT>\n${JSON.stringify(compactCoachContext(context, task))}\n</CONTEXT>\n<CONVERSATION_SUMMARY>\n${conversationSummary.slice(0, 2400)}\n</CONVERSATION_SUMMARY>\n<MEMORY>\n${JSON.stringify(selectedMemory)}\n</MEMORY>`;
@@ -322,7 +323,10 @@ export class OpenAiCoachProvider {
     if (parsed.actionType === 'replace_plan_ingredient' && parsed.ingredientToReplace && parsed.replacementIngredient) {
       return finish(parsed.message, { type: 'replace_plan_ingredient', change: { slotId: parsed.planSlotId ?? undefined, ingredientToReplace: parsed.ingredientToReplace, replacementIngredient: parsed.replacementIngredient } });
     }
-    return finish(parsed.message, null);
+    const claimedWithoutAction = /\b(?:he\s+)?(?:registrad[oa]|agregad[oa]|anadid[oa])\b/i.test(parsed.message);
+    return finish(claimedWithoutAction
+      ? (context.locale === 'en-US' ? 'I could not complete that registration. Please tell me the food and amount again.' : 'No pude completar ese registro. Dime nuevamente el alimento y la cantidad para guardarlo correctamente.')
+      : parsed.message, null);
   }
 
   async summarize(existingSummary: string, messages: CoachConversationMessage[], safetyIdentifier?: string): Promise<CoachSummaryResult> {

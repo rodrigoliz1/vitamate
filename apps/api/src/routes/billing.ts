@@ -2,11 +2,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import Stripe from 'stripe';
 import { z } from 'zod';
 import { config, isLocalDevelopmentOrigin } from '../config.js';
-import { claimWebhookEvent, claimAppleWebhookEvent, customerIdForUser, getEntitlement, isPremium, releaseWebhookEvent, releaseAppleWebhookEvent, saveCustomer, upsertSubscription, upsertAppleSubscription, userIdForCustomer, userIdForAppleOriginalTransaction, type BillingStatus } from '../repositories/billingRepository.js';
+import { claimWebhookEvent, claimAppleWebhookEvent, claimPromotionalTrial, customerIdForUser, getEntitlement, isPremium, releaseWebhookEvent, releaseAppleWebhookEvent, saveCustomer, upsertSubscription, upsertAppleSubscription, userIdForCustomer, userIdForAppleOriginalTransaction, type BillingStatus } from '../repositories/billingRepository.js';
 import { appleInterval, verifyAppleNotification, verifyAppleRenewalInfo, verifyAppleTransaction } from '../services/appleStore.js';
 import { requireUser } from '../services/auth.js';
 import { requireSupabase } from '../services/supabase.js';
 import { getVoiceCreditBalance, grantVoiceCredit, VOICE_CREDIT_PACKAGES, voicePackage, voicePackageForAppleProduct } from '../repositories/voiceCreditsRepository.js';
+import { promotionalTrialOffer } from '../services/promotionalTrial.js';
 
 const stripe = config.STRIPE_SECRET_KEY ? new Stripe(config.STRIPE_SECRET_KEY) : null;
 let offersCache: {
@@ -201,10 +202,26 @@ export async function billingRoutes(app: FastifyInstance) {
     }
     return {
       entitlement,
+      promoTrial: promotionalTrialOffer(entitlement, config.PROMO_TRIAL_ENABLED),
       configured,
       offers,
       voiceBalance: await getVoiceCreditBalance(userId),
       voiceOffers: VOICE_CREDIT_PACKAGES,
+    };
+  });
+
+  app.post('/v1/billing/promo-trial/claim', async (request) => {
+    const { userId } = await requireUser(request);
+    if (!config.PROMO_TRIAL_ENABLED) {
+      throw Object.assign(new Error('Esta promoción ya no está disponible.'), {
+        statusCode: 410,
+        code: 'PROMO_TRIAL_DISABLED',
+      });
+    }
+    const entitlement = await claimPromotionalTrial(userId, 5);
+    return {
+      entitlement,
+      promoTrial: promotionalTrialOffer(entitlement, config.PROMO_TRIAL_ENABLED),
     };
   });
 
@@ -300,7 +317,7 @@ export async function billingRoutes(app: FastifyInstance) {
     }
     // La prueba sólo se marca como utilizada cuando Stripe crea realmente una
     // suscripción con trial_end. Abandonar Checkout no debe consumirla.
-    const grantTrial = !(await getEntitlement(userId)).trialUsed;
+    const grantTrial = !config.PROMO_TRIAL_ENABLED && !(await getEntitlement(userId)).trialUsed;
     const appUrl = checkoutReturnUrl(returnUrl);
     const session = await stripeClient.checkout.sessions.create({
       mode: 'subscription',

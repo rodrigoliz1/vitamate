@@ -18,6 +18,7 @@ import { PlanSelection } from './components/PlanSelection';
 import { PremiumGate } from './components/PremiumGate';
 import { SubscriptionModal } from './components/SubscriptionModal';
 import { SubscriptionCelebration } from './components/SubscriptionCelebration';
+import { PromoTrialModal, type PromoTrialNotice } from './components/PromoTrialModal';
 import { BrandMark } from './components/BrandMark';
 import type { BillingEntitlement } from './services/api';
 import { resolveUiLocale, type ColorTheme } from './config/appFeatures';
@@ -85,6 +86,8 @@ const App: React.FC = () => {
   const [pendingRegistrationEmail, setPendingRegistrationEmail] = useState<string | null>(initialPendingEmail);
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
   const [celebration, setCelebration] = useState<BillingEntitlement | null>(null);
+  const [promoNotice, setPromoNotice] = useState<PromoTrialNotice | null>(null);
+  const [promoError, setPromoError] = useState('');
   const handledCheckout = useRef<string | null>(null);
   const handledVoiceCheckout = useRef<string | null>(null);
   useEffect(() => {
@@ -176,6 +179,33 @@ const App: React.FC = () => {
       .then(clear)
       .catch(() => undefined);
   }, [actions.cloud.email, actions.reconcileVoiceCheckout]);
+  useEffect(() => {
+    const promo = actions.billing.promoTrial;
+    const userId = actions.cloud.userId;
+    if (!userId || !snapshot.profile || !snapshot.planSelectionCompleted || !promo || promoNotice || subscriptionOpen || celebration) return;
+
+    let notice: PromoTrialNotice | null = null;
+    let storage: Storage = window.sessionStorage;
+    let key = '';
+    if (promo.state === 'available' && promo.eligible) {
+      notice = 'gift';
+      key = `vitamate.promo.gift:${userId}`;
+    } else if (promo.state === 'active' && promo.endsAt) {
+      const remainingCalendarDays = calendarDaysUntil(promo.endsAt);
+      if (remainingCalendarDays === 2) notice = 'two_days';
+      else if (remainingCalendarDays === 1) notice = 'one_day';
+      else if (remainingCalendarDays === 0) notice = 'today';
+      storage = window.localStorage;
+      key = notice ? `vitamate.promo.reminder:${userId}:${promo.endsAt}:${notice}` : '';
+    } else if (promo.state === 'expired' && !actions.billing.isPremium) {
+      notice = 'expired';
+      key = `vitamate.promo.expired:${userId}:${promo.endsAt ?? 'used'}`;
+    }
+    if (!notice || !key || storage.getItem(key)) return;
+    storage.setItem(key, new Date().toISOString());
+    setPromoError('');
+    setPromoNotice(notice);
+  }, [actions.billing.isPremium, actions.billing.promoTrial, actions.cloud.userId, celebration, promoNotice, snapshot.planSelectionCompleted, snapshot.profile, subscriptionOpen]);
   if (!actions.cloud.sessionReady) return <AppBootScreen />;
   if (!actions.cloud.email)
     return (
@@ -273,6 +303,27 @@ const App: React.FC = () => {
           </IonTabBar>
         </IonTabs>
         <SubscriptionModal isOpen={subscriptionOpen} onDismiss={() => setSubscriptionOpen(false)} entitlement={actions.billing.entitlement} offers={actions.billing.offers} configured={actions.billing.configured} loading={actions.billing.busy} statusMessage={actions.billing.message} native={actions.billing.native} onRefresh={actions.billing.refresh} onPurchase={actions.billing.purchase} onManage={actions.billing.manage} onRestore={actions.billing.restore} onLeavingForCheckout={actions.completePlanSelection} />
+        {promoNotice && (
+          <PromoTrialModal
+            isOpen
+            notice={promoNotice}
+            preferredName={snapshot.profile.preferredName}
+            endsAt={actions.billing.promoTrial?.endsAt}
+            busy={actions.billing.busy}
+            message={promoError}
+            onDismiss={() => { setPromoError(''); setPromoNotice(null); }}
+            onClaim={async () => {
+              try {
+                const entitlement = await actions.billing.claimPromotionalTrial();
+                setPromoNotice(null);
+                setCelebration(entitlement);
+              } catch (error) {
+                setPromoError(error instanceof Error ? error.message : 'No fue posible activar tu regalo Premium.');
+              }
+            }}
+            onSubscribe={() => { setPromoNotice(null); setSubscriptionOpen(true); }}
+          />
+        )}
         {celebration && <SubscriptionCelebration entitlement={celebration} isOpen onDismiss={() => setCelebration(null)} />}
       </IonReactRouter>
     </IonApp>
@@ -280,3 +331,11 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+function calendarDaysUntil(value: string) {
+  const now = new Date();
+  const end = new Date(value);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  return Math.round((endDay - today) / 86_400_000);
+}

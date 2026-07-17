@@ -14,6 +14,7 @@ const confetti = Array.from({ length: 30 }, (_, index) => ({
 export function SubscriptionCelebration({ entitlement, isOpen, onDismiss }: { entitlement: BillingEntitlement; isOpen: boolean; onDismiss(): void }) {
   const annual = entitlement.billingInterval === 'year';
   const isTrial = entitlement.status === 'trialing';
+  const promotional = isTrial && entitlement.source === 'none';
   const nextDate = isTrial ? entitlement.trialEnd : entitlement.currentPeriodEnd;
   return <IonModal isOpen={isOpen} onDidDismiss={onDismiss} className="celebration-modal">
     <section className="celebration-shell" aria-labelledby="celebration-title">
@@ -21,10 +22,10 @@ export function SubscriptionCelebration({ entitlement, isOpen, onDismiss }: { en
       <button className="celebration-close" onClick={onDismiss} aria-label="Cerrar"><IonIcon icon={closeOutline} /></button>
       <span className="celebration-mark"><IonIcon icon={checkmarkCircle} /></span>
       <p className="eyebrow">Bienvenido a VITAMATE Premium</p>
-      <h2 id="celebration-title">Gracias por elegir tu mejor versión.</h2>
-      <p className="celebration-lead">Tu plan ya está activo. Acabas de convertir una intención en un compromiso contigo.</p>
+      <h2 id="celebration-title">{promotional ? 'Tu regalo Premium está activo.' : 'Gracias por elegir tu mejor versión.'}</h2>
+      <p className="celebration-lead">{promotional ? 'Durante cinco días podrás vivir VITAMATE completo, sin tarjeta y sin ningún compromiso.' : 'Tu plan ya está activo. Acabas de convertir una intención en un compromiso contigo.'}</p>
       <div className="celebration-details">
-        <article><small>Tu plan</small><strong>Premium {annual ? 'anual' : 'mensual'}</strong></article>
+        <article><small>Tu plan</small><strong>{promotional ? 'Premium de regalo' : `Premium ${annual ? 'anual' : 'mensual'}`}</strong></article>
         <article><small>{isTrial ? 'Prueba sin costo hasta' : entitlement.cancelAtPeriodEnd ? 'Tu acceso termina' : 'Próxima facturación'}</small><strong>{formatDate(nextDate)}</strong></article>
         <article><small>Estado</small><strong>{isTrial ? 'Prueba Premium activa' : entitlement.cancelAtPeriodEnd ? 'Cancelación programada' : 'Acceso Premium activo'}</strong></article>
       </div>

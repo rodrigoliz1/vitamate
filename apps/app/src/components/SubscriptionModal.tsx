@@ -24,6 +24,7 @@ export function SubscriptionModal({ isOpen, onDismiss, entitlement, offers, conf
   const [error, setError] = useState('');
   const periodActive = !entitlement?.currentPeriodEnd || Date.parse(entitlement.currentPeriodEnd) > Date.now();
   const premium = entitlement?.plan === 'premium' && ['active', 'trialing'].includes(entitlement.status) && periodActive;
+  const promotional = premium && entitlement?.source === 'none';
   const webPurchase = entitlement?.source === 'stripe' || (entitlement?.source !== 'apple' && Boolean(entitlement?.stripeCustomerId));
   const start = async (interval: 'month' | 'year') => {
     setBusy(interval); setError('');
@@ -49,12 +50,12 @@ export function SubscriptionModal({ isOpen, onDismiss, entitlement, offers, conf
   };
   return <IonModal isOpen={isOpen} onDidDismiss={onDismiss} className="subscription-modal"><div className="subscription-shell">
     <button className="subscription-close" aria-label="Cerrar" onClick={onDismiss}><IonIcon icon={closeOutline} /></button>
-    <header><span><IonIcon icon={sparklesOutline} /></span><p className="eyebrow">VITAMATE Premium</p><h2>{premium ? 'Tu mejor versión está en marcha' : 'Todo tu plan. Un solo compañero.'}</h2><p>{premium ? subscriptionStatus(entitlement) : 'Activa siete días gratis una sola vez y convierte tus datos en un plan que aprende contigo.'}</p></header>
+    <header><span><IonIcon icon={sparklesOutline} /></span><p className="eyebrow">VITAMATE Premium</p><h2>{premium ? 'Tu mejor versión está en marcha' : 'Todo tu plan. Un solo compañero.'}</h2><p>{premium ? subscriptionStatus(entitlement) : 'Elige el plan que mejor encaja contigo y convierte tus datos en un acompañamiento que aprende contigo.'}</p></header>
     <div className="premium-benefits"><Benefit icon={chatbubblesOutline} text="VITACOACH por chat y llamada" /><Benefit icon={cameraOutline} text="Análisis de alimentos por fotografía" /><Benefit icon={barbellOutline} text="Entrenamientos guiados y progresivos" /><Benefit icon={restaurantOutline} text="Plan alimenticio, súper y costos" /></div>
-    {premium ? <div className="current-plan-panel"><strong>Plan Premium {entitlement.billingInterval === 'year' ? 'anual' : 'mensual'}</strong><span>{entitlement.cancelAtPeriodEnd ? 'Termina' : 'Próxima renovación'}: {formatDate(entitlement.currentPeriodEnd)}</span><IonButton expand="block" className="primary-button" disabled={busy !== null} onClick={portal}>{busy === 'portal' ? <IonSpinner /> : webPurchase && native ? 'Plan adquirido en vitamate.mx' : `Administrar en ${native || entitlement.source === 'apple' ? 'App Store' : 'Stripe'}`}</IonButton></div> : <div className="subscription-options">
+    {premium ? <div className="current-plan-panel"><strong>{promotional ? 'Prueba Premium de regalo' : `Plan Premium ${entitlement.billingInterval === 'year' ? 'anual' : 'mensual'}`}</strong><span>{promotional ? 'Acceso completo hasta' : entitlement.cancelAtPeriodEnd ? 'Termina' : 'Próxima renovación'}: {formatDate(entitlement.currentPeriodEnd)}</span>{promotional ? <small>Sin tarjeta, cargos ni renovación automática.</small> : <IonButton expand="block" className="primary-button" disabled={busy !== null} onClick={portal}>{busy === 'portal' ? <IonSpinner /> : webPurchase && native ? 'Plan adquirido en vitamate.mx' : `Administrar en ${native || entitlement.source === 'apple' ? 'App Store' : 'Stripe'}`}</IonButton>}</div> : <div className="subscription-options">
       <PlanButton interval="year" label="Premium anual" badge="Mejor elección" offer={offers.find((item) => item.interval === 'year')} busy={busy} onClick={start} />
       <PlanButton interval="month" label="Premium mensual" offer={offers.find((item) => item.interval === 'month')} busy={busy} onClick={start} />
-      <p><IonIcon icon={checkmarkCircle} /> {entitlement?.trialUsed ? 'La prueba gratuita de esta cuenta ya fue utilizada.' : '7 días gratis una sola vez cuando la oferta introductoria esté disponible. Después se cobra el periodo elegido.'}</p>
+      <p><IonIcon icon={checkmarkCircle} /> {entitlement?.trialUsed ? 'La prueba gratuita de esta cuenta ya fue utilizada.' : 'Pago protegido y administración desde el proveedor de tu plataforma.'}</p>
       {native && <button type="button" className="free-plan-link" disabled={busy !== null} onClick={restore}>{busy === 'restore' ? 'Restaurando…' : 'Restaurar compras de App Store'}</button>}
     </div>}
     {!premium && (loading || busy === 'refresh') && <p className="billing-connection-state"><IonSpinner /> Verificando tu cuenta y el catálogo…</p>}
@@ -72,4 +73,4 @@ function PlanButton({ interval, label, badge, offer, busy, onClick }: { interval
 }
 function money(amount: number, currency: string) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: currency.toUpperCase(), maximumFractionDigits: 0 }).format(amount / 100); }
 function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(new Date(value)) : 'por confirmar'; }
-function subscriptionStatus(entitlement: BillingEntitlement) { return entitlement.status === 'trialing' ? `Tu prueba termina el ${formatDate(entitlement.trialEnd)}.` : `Tu acceso está activo y se actualiza mediante ${entitlement.source === 'apple' ? 'App Store' : 'Stripe'}.`; }
+function subscriptionStatus(entitlement: BillingEntitlement) { return entitlement.status === 'trialing' ? `Tu prueba termina el ${formatDate(entitlement.trialEnd)}.` : `Tu acceso está activo y se actualiza mediante ${entitlement.source === 'apple' ? 'App Store' : entitlement.source === 'stripe' ? 'Stripe' : 'VITAMATE'}.`; }

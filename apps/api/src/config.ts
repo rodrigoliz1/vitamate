@@ -38,6 +38,7 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ANNUAL: z.string().optional(),
+  PROMO_TRIAL_ENABLED: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
   APPLE_BUNDLE_ID: z.string().default('mx.vitamate.app'),
   // Render can preserve empty values, quotes or deployment placeholders.
   // Ignore anything other than the numeric ID assigned by App Store Connect.

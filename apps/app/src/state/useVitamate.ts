@@ -4,7 +4,7 @@ import { calculateNutritionTarget, buildWorkoutFeedback, generateStarterWorkoutP
 import { browserLocalRepository, type VitamateSnapshot } from '../data/localRepository';
 import { fetchCloudSnapshot, reconcileCloudSnapshot } from '../services/cloudRepository';
 import { supabase, supabaseConfigured } from '../services/supabase';
-import { deleteAccount as deleteRemoteAccount, fetchBillingStatus, reconcileCheckout as reconcileStripeCheckout, reconcileVoiceCheckout as reconcileStripeVoiceCheckout, registerAccount, requestAuthOtp, requestPasswordReset, resendRegistrationOtp, type BillingEntitlement, type BillingOffer, type OtpVerificationType, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
+import { claimPromotionalTrial as claimRemotePromotionalTrial, deleteAccount as deleteRemoteAccount, fetchBillingStatus, reconcileCheckout as reconcileStripeCheckout, reconcileVoiceCheckout as reconcileStripeVoiceCheckout, registerAccount, requestAuthOtp, requestPasswordReset, resendRegistrationOtp, type BillingEntitlement, type BillingOffer, type OtpVerificationType, type PromotionalTrialOffer, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
 import { loadBillingOffers, loadVoiceOffers, manageSubscription, nativeBilling, purchaseVoiceTime, restoreSubscriptions, startSubscription } from '../services/nativeBilling';
 import { readNativeHealthSummary, supportsNativeHealth, type NativeHealthSummary } from '../services/nativeHealth';
 import type { WellnessReminder } from '../models/reminders';
@@ -37,6 +37,7 @@ export function useVitamate() {
   const [sessionReady, setSessionReady] = useState(!supabase);
   const [cloudSnapshotReady, setCloudSnapshotReady] = useState(!supabase);
   const [billing, setBilling] = useState<BillingEntitlement | null>(null);
+  const [promoTrial, setPromoTrial] = useState<PromotionalTrialOffer | null>(null);
   const [billingOffers, setBillingOffers] = useState<BillingOffer[]>([]);
   const [voiceBalance, setVoiceBalance] = useState<VoiceCreditBalance | null>(null);
   const [voiceOffers, setVoiceOffers] = useState<VoiceCreditOffer[]>([]);
@@ -116,6 +117,7 @@ export function useVitamate() {
   const refreshBilling = useCallback(async () => {
     if (!cloudUserId) {
       setBilling(null);
+      setPromoTrial(null);
       return null;
     }
     setBillingBusy(true);
@@ -123,6 +125,7 @@ export function useVitamate() {
     try {
       const result = await fetchBillingStatus();
       setBilling(result.entitlement);
+      setPromoTrial(result.promoTrial ?? null);
       setVoiceBalance(result.voiceBalance ?? null);
       const serverVoiceOffers = result.voiceOffers ?? [];
       const [offers, callOffers] = await Promise.all([loadBillingOffers(result.offers).catch(() => (nativeBilling ? [] : result.offers)), loadVoiceOffers(serverVoiceOffers).catch(() => serverVoiceOffers)]);
@@ -134,6 +137,24 @@ export function useVitamate() {
       setBillingConfigured(null);
       setBillingMessage(error instanceof Error ? error.message : 'No fue posible consultar tu suscripción.');
       return null;
+    } finally {
+      setBillingBusy(false);
+    }
+  }, [cloudUserId]);
+
+  const claimPromotionalTrial = useCallback(async () => {
+    if (!cloudUserId) throw new Error('Primero inicia sesión en tu cuenta.');
+    setBillingBusy(true);
+    setBillingMessage('');
+    try {
+      const result = await claimRemotePromotionalTrial();
+      setBilling(result.entitlement);
+      setPromoTrial(result.promoTrial);
+      return result.entitlement;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No fue posible activar tu regalo Premium.';
+      setBillingMessage(message);
+      throw error;
     } finally {
       setBillingBusy(false);
     }
@@ -1000,6 +1021,7 @@ export function useVitamate() {
       latestSnapshot.current = empty;
       setSnapshot(empty);
       setBilling(null);
+      setPromoTrial(null);
       setVoiceBalance(null);
       setCloudMessage('Tu cuenta y sus datos fueron eliminados.');
     } finally {
@@ -1056,6 +1078,7 @@ export function useVitamate() {
     reconcileVoiceCheckout,
     billing: {
       entitlement: billing,
+      promoTrial,
       offers: billingOffers,
       configured: billingConfigured,
       busy: billingBusy,
@@ -1064,6 +1087,7 @@ export function useVitamate() {
       native: nativeBilling,
       refresh: refreshBilling,
       purchase: purchaseSubscription,
+      claimPromotionalTrial,
       restore: restoreSubscription,
       manage: openSubscriptionManagement,
       voiceBalance,

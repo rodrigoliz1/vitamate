@@ -113,6 +113,17 @@ export interface BillingEntitlement {
   stripeCustomerId: string | null;
   source?: 'none' | 'stripe' | 'apple';
   appleProductId?: string | null;
+  promoTrialStatus: 'unclaimed' | 'active' | 'expired';
+  promoTrialClaimedAt: string | null;
+  promoTrialEndsAt: string | null;
+}
+
+export interface PromotionalTrialOffer {
+  enabled: boolean;
+  state: 'available' | 'active' | 'expired' | 'unavailable';
+  eligible: boolean;
+  days: number;
+  endsAt: string | null;
 }
 
 export interface BillingOffer {
@@ -142,12 +153,20 @@ export interface VoiceCreditOffer {
 }
 export function fetchBillingStatus(): Promise<{
   entitlement: BillingEntitlement;
+  promoTrial: PromotionalTrialOffer;
   configured: boolean;
   offers: BillingOffer[];
   voiceBalance: VoiceCreditBalance;
   voiceOffers: VoiceCreditOffer[];
 }> {
   return request('/v1/billing/status');
+}
+
+export function claimPromotionalTrial(): Promise<{
+  entitlement: BillingEntitlement;
+  promoTrial: PromotionalTrialOffer;
+}> {
+  return request('/v1/billing/promo-trial/claim', { method: 'POST' });
 }
 
 export function reconcileCheckout(sessionId: string): Promise<{

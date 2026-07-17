@@ -13,9 +13,12 @@ export interface Entitlement {
   stripeCustomerId: string | null;
   source: 'none' | 'stripe' | 'apple';
   appleProductId: string | null;
+  promoTrialStatus: 'unclaimed' | 'active' | 'expired';
+  promoTrialClaimedAt: string | null;
+  promoTrialEndsAt: string | null;
 }
 
-const selectFields = 'user_id, plan, status, billing_interval, current_period_end, trial_end, trial_used, cancel_at_period_end, stripe_customer_id, source, apple_product_id';
+const selectFields = 'user_id, plan, status, billing_interval, current_period_end, trial_end, trial_used, cancel_at_period_end, stripe_customer_id, source, apple_product_id, promo_trial_status, promo_trial_claimed_at, promo_trial_ends_at';
 
 function map(row: Record<string, unknown>): Entitlement {
   return {
@@ -30,17 +33,37 @@ function map(row: Record<string, unknown>): Entitlement {
     stripeCustomerId: typeof row.stripe_customer_id === 'string' ? row.stripe_customer_id : null,
     source: row.source === 'stripe' || row.source === 'apple' ? row.source : 'none',
     appleProductId: typeof row.apple_product_id === 'string' ? row.apple_product_id : null,
+    promoTrialStatus: row.promo_trial_status === 'active' || row.promo_trial_status === 'expired' ? row.promo_trial_status : 'unclaimed',
+    promoTrialClaimedAt: typeof row.promo_trial_claimed_at === 'string' ? row.promo_trial_claimed_at : null,
+    promoTrialEndsAt: typeof row.promo_trial_ends_at === 'string' ? row.promo_trial_ends_at : null,
   };
 }
 
 export async function getEntitlement(userId: string): Promise<Entitlement> {
   const db = requireSupabase();
+  const { error: expirationError } = await db.rpc('expire_promotional_trial', { p_user_id: userId });
+  if (expirationError) throw expirationError;
   const { data, error } = await db.from('subscription_entitlements').select(selectFields).eq('user_id', userId).maybeSingle();
   if (error) throw error;
   if (data) return map(data);
   const { data: created, error: createError } = await db.from('subscription_entitlements').insert({ user_id: userId }).select(selectFields).single();
   if (createError) throw createError;
   return map(created);
+}
+
+export async function claimPromotionalTrial(userId: string, days = 5): Promise<Entitlement> {
+  const { data, error } = await requireSupabase().rpc('claim_promotional_trial', {
+    p_user_id: userId,
+    p_days: days,
+  });
+  if (error) throw error;
+  if (data !== true) {
+    throw Object.assign(new Error('Esta cuenta ya utilizó su regalo Premium o no es elegible.'), {
+      statusCode: 409,
+      code: 'PROMO_TRIAL_NOT_ELIGIBLE',
+    });
+  }
+  return getEntitlement(userId);
 }
 
 export async function isPremium(userId: string): Promise<boolean> {

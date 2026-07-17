@@ -451,9 +451,6 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
                         <IonIcon icon={createOutline} />
                       </button>
                     )}
-                    <button className="icon-button" aria-label={`Eliminar ${meal.name}`} onClick={() => onDeleteMeal(meal.id)}>
-                      <IonIcon icon={trashOutline} />
-                    </button>
                   </article>
                 ))}
               </div>
@@ -819,6 +816,21 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
               </div>
               <IonButton type="submit" expand="block" className="primary-button">
                 Guardar cambios
+              </IonButton>
+              <IonButton
+                type="button"
+                expand="block"
+                fill="clear"
+                color="danger"
+                className="record-delete-button"
+                onClick={() => {
+                  onDeleteMeal(editingMeal.id);
+                  setEditingMeal(null);
+                  setMessage('Registro eliminado.');
+                }}
+              >
+                <IonIcon slot="start" icon={trashOutline} />
+                Eliminar
               </IonButton>
             </form>
           )}

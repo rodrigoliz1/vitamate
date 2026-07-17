@@ -4,8 +4,15 @@ export type CoachTask = 'general' | 'nutrition' | 'meal_log' | 'training' | 'wor
 
 const normalize = (value: string) => value.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-export function classifyCoachTask(message: string, attachment: CoachAttachment = {}): CoachTask {
-  const text = normalize(message);
+export function classifyCoachTask(message: string, attachment: CoachAttachment = {}, history: Array<{ role: 'user' | 'assistant'; content: string }> = []): CoachTask {
+  let text = normalize(message);
+  // Confirmaciones breves como “regístralo” dependen de la última descripción
+  // hecha por el usuario. Sólo retomamos texto del usuario, nunca una inferencia
+  // del asistente, y únicamente para escoger el esquema de acción.
+  if (/^[¡¿]*(?:si[, ]*)?(?:registralo|registrala|agregalo|agregala|anadelo|anadela|hazlo)(?: por favor)?[!. ]*$/.test(text)) {
+    const referent = [...history].reverse().find((item) => item.role === 'user' && item.content.trim().length > 8 && !/^[¡¿]*(?:si[, ]*)?(?:registralo|registrala|agregalo|agregala|anadelo|anadela|hazlo)/.test(normalize(item.content)));
+    if (referent) text = `${text} ${normalize(referent.content)}`;
+  }
   if (/(?:dormi|descanse|he dormido).*(?:minut|hora)|(?:registra|registrame|registralo|agrega|anade).*(?:sueno|descanso|dormi)/.test(text)) return 'sleep_log';
   if (attachment.document || /laboratorio|analisis|estudio|documento|pdf|glucosa|colesterol|sangre|lesion|dolor|mareo|cansad|sueno|estres|enferm/.test(text)) return 'health';
   if (/cambia|reemplaza|sustituye|intercambia/.test(text) && /plan|menu|comida|ingrediente|desayuno|cena|colacion/.test(text)) return 'plan_change';
@@ -13,7 +20,7 @@ export function classifyCoachTask(message: string, attachment: CoachAttachment =
   const actionWord = /registra|registrame|registralo|agrega|anade/;
   const completedActivity = /hice|entrene|corri|camine|termine|jugue|practique|nade|pedalee/;
   if ((actionWord.test(text) && activityWord.test(text)) || (completedActivity.test(text) && (activityWord.test(text) || /minut|hora|km/.test(text)))) return 'workout_log';
-  if (/^(?:registrame|registra|agregame|agrega|anade)\b/.test(text) || /\b(?:ya\s+)?(?:me\s+)?(?:comi|desayune|almorce|cene|tome|bebi)\b/.test(text)) return 'meal_log';
+  if (/^[¡¿]*(?:registrame|registra|registralo|registrala|agregame|agrega|anade)\b/.test(text) || /\b(?:ya\s+)?(?:me\s+)?(?:comi|desayune|almorce|cene|tome|bebi)\b/.test(text) || /\bmi\s+(?:desayuno|comida|almuerzo|cena|colacion)\s+(?:fue|era|consistio|incluyo|tenia)\b/.test(text)) return 'meal_log';
   if (/calori|proteina|carbohidr|grasa|macro|comida|alimento|receta|desayuno|cena|colacion|hambre|dieta|nutric|foto de alimento/.test(text)) return 'nutrition';
   if (/entren|ejercicio|rutina|serie|repeticion|sentadilla|press|correr|caminar|gym|fuerza|cardio|movilidad/.test(text)) return 'training';
   if (/progreso|avance|peso|meta|semana|adherencia|balance|como voy|planea mi dia|plan my day/.test(text)) return 'progress';

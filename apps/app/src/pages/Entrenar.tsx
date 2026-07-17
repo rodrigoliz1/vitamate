@@ -184,9 +184,6 @@ const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkou
                       <button className="icon-button" aria-label={`Editar ${session.workoutTitle}`} onClick={() => setEditing(session)}>
                         <IonIcon icon={createOutline} />
                       </button>
-                      <button className="icon-button" aria-label={`Eliminar ${session.workoutTitle}`} onClick={() => onDeleteWorkout(session.id)}>
-                        <IonIcon icon={trashOutline} />
-                      </button>
                     </div>
                   )}
                   {session.feedback && <p>{session.feedback}</p>}
@@ -272,6 +269,20 @@ const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkou
               </div>
               <IonButton type="submit" expand="block" className="primary-button">
                 Guardar cambios
+              </IonButton>
+              <IonButton
+                type="button"
+                expand="block"
+                fill="clear"
+                color="danger"
+                className="record-delete-button"
+                onClick={() => {
+                  onDeleteWorkout(editing.id);
+                  setEditing(null);
+                }}
+              >
+                <IonIcon slot="start" icon={trashOutline} />
+                Eliminar
               </IonButton>
             </form>
           )}
