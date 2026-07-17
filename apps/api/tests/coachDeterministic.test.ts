@@ -47,3 +47,37 @@ test('convierte el sueño reportado en una acción persistible', async () => {
     },
   });
 });
+
+test('registra un desayuno compuesto desde una descripción natural sin usar IA', async () => {
+  const reply = await tryDeterministicCoachReply(
+    'Desayuné 2 huevos, 100 gramos de machaca, 2 tortillas de maíz y frijoles',
+    now,
+    'America/Mexico_City',
+    'es-MX',
+  );
+
+  assert.equal(reply?.model, 'none');
+  assert.equal(reply?.task, 'meal_log');
+  assert.equal(reply?.action?.type, 'log_meal');
+  if (reply?.action?.type !== 'log_meal') assert.fail('La descripción debe producir una acción de comida.');
+  assert.equal(reply.action.meal.mealType, 'breakfast');
+  assert.ok(reply.action.meal.calories >= 600);
+  assert.ok(reply.action.meal.proteinG >= 50);
+  assert.match(reply.action.meal.name, /machaca/i);
+});
+
+test('tolera errores ortográficos y cantidades mixtas en una comida compuesta', async () => {
+  const reply = await tryDeterministicCoachReply(
+    'Desayune 2 huevos, 100 gramos de carne, 1 tortilla de mais, 1 tortilla de harina, un poco de salsa macha y una guarnicion de frijoles',
+    now,
+    'America/Mexico_City',
+    'es-MX',
+  );
+
+  assert.equal(reply?.model, 'none');
+  assert.equal(reply?.action?.type, 'log_meal');
+  if (reply?.action?.type !== 'log_meal') assert.fail('La descripción debe producir una acción de comida.');
+  assert.ok(reply.action.meal.calories >= 750);
+  assert.ok(reply.action.meal.carbohydratesG > 0);
+  assert.ok(reply.action.meal.fatG > 0);
+});

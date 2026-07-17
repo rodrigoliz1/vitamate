@@ -111,6 +111,7 @@ Safety: provide education, not diagnosis, treatment, prescriptions or supplement
 const actionInstructions = `
 Action rules:
 - The output is structured. Always write the natural-language response in message.
+- TASK is selected by trusted application logic. When TASK=meal_log, you must return log_meal with every meal field completed; never return none or only claim success in message.
 - Resolve short confirmations such as "regístralo", "agrégalo" or "hazlo" from the most recent relevant user message in the conversation. The referent may come from conversation history, never from CONTEXT or assistant claims.
 - If the user clearly states that they already ate or drank something (for example "me desayuné", "comí", "cené", "tomé" or explicitly asks to register it), return actionType=log_meal. Estimate the combined calories and macros conservatively from the stated quantities. Use the stated meal period when present; otherwise infer it from currentDateTime. Include brand and quantities in mealName. State unambiguously that it has already been registered as an estimate and can be undone; do not ask whether the user is ready and do not say that you will register it later.
 - If the user clearly reports completed physical activity or begins with "Registra mi actividad física", return actionType=log_workout. Extract duration and calories when supplied; otherwise make a conservative estimate. Choose the closest activity type and use perceived effort 5 when it is not stated. Do not quote the old weeklyWorkout remainder in the response because it does not yet include this activity; the application will append the updated arithmetic.
@@ -180,6 +181,21 @@ const responseSchema = {
   required: ['message', 'actionType', 'mealName', 'mealType', 'mealOccurredAt', 'mealCalories', 'mealProteinG', 'mealCarbohydratesG', 'mealFatG', 'workoutTitle', 'workoutActivityType', 'workoutOccurredAt', 'workoutDurationMinutes', 'workoutCaloriesBurned', 'workoutPerceivedEffort', 'sleepStartedAt', 'sleepEndedAt', 'sleepDurationMinutes', 'sleepQuality', 'sleepNote', 'planSlotId', 'planOptionId', 'planOptionName', 'planOptionMealType', 'planOptionCalories', 'planOptionProteinG', 'planOptionCarbohydratesG', 'planOptionFatG', 'planOptionIngredients', 'planOptionSteps', 'planOptionPrepMinutes', 'planOptionDifficulty', 'ingredientToReplace', 'replacementIngredient', 'memoryUpdates'],
 } as const;
 
+const mealLogResponseSchema = {
+  ...responseSchema,
+  properties: {
+    ...responseSchema.properties,
+    actionType: { type: 'string', enum: ['log_meal'] },
+    mealName: { type: 'string', minLength: 1, maxLength: 180 },
+    mealType: { type: 'string', enum: ['breakfast', 'lunch', 'dinner', 'snack'] },
+    mealOccurredAt: { type: 'string', minLength: 10, maxLength: 40 },
+    mealCalories: { type: 'number', minimum: 0, maximum: 10_000 },
+    mealProteinG: { type: 'number', minimum: 0, maximum: 1_000 },
+    mealCarbohydratesG: { type: 'number', minimum: 0, maximum: 1_000 },
+    mealFatG: { type: 'number', minimum: 0, maximum: 1_000 },
+  },
+} as const;
+
 const adviceResponseSchema = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -224,7 +240,7 @@ export class OpenAiCoachProvider {
     const task = classifyCoachTask(message, attachment, history);
     const actionCapable = ['meal_log', 'workout_log', 'sleep_log', 'plan_change'].includes(task);
     const selectedMemory = selectRelevantMemories(message, task, memory);
-    const contextMessage = `<CONTEXT>\n${JSON.stringify(compactCoachContext(context, task))}\n</CONTEXT>\n<CONVERSATION_SUMMARY>\n${conversationSummary.slice(0, 2400)}\n</CONVERSATION_SUMMARY>\n<MEMORY>\n${JSON.stringify(selectedMemory)}\n</MEMORY>`;
+    const contextMessage = `<TASK>${task}</TASK>\n<CONTEXT>\n${JSON.stringify(compactCoachContext(context, task))}\n</CONTEXT>\n<CONVERSATION_SUMMARY>\n${conversationSummary.slice(0, 2400)}\n</CONVERSATION_SUMMARY>\n<MEMORY>\n${JSON.stringify(selectedMemory)}\n</MEMORY>`;
     const input = [
       { role: 'user' as const, content: contextMessage },
       // Los mensajes persistidos incluyen id y createdAt para la interfaz.
@@ -243,7 +259,7 @@ export class OpenAiCoachProvider {
       store: false,
       truncation: 'auto',
       prompt_cache_key: `vitamate-coach-v2:${model}`,
-      text: { format: { type: 'json_schema', name: actionCapable ? 'vitacoach_action_response' : 'vitacoach_advice_response', strict: true, schema: actionCapable ? responseSchema : adviceResponseSchema } },
+      text: { format: { type: 'json_schema', name: task === 'meal_log' ? 'vitacoach_meal_log_response' : actionCapable ? 'vitacoach_action_response' : 'vitacoach_advice_response', strict: true, schema: task === 'meal_log' ? mealLogResponseSchema : actionCapable ? responseSchema : adviceResponseSchema } },
     });
     let response: Response | null = null;
     let upstreamError = '';
@@ -296,8 +312,9 @@ export class OpenAiCoachProvider {
     const finish = (replyMessage: string, action: CoachAction | null): CoachReply => ({
       message: replyMessage.replace(/\*\*/g, ''), action, memoryUpdates, usage, model, task,
     });
-    if (parsed.actionType === 'log_meal' && parsed.mealName && parsed.mealType && parsed.mealOccurredAt && parsed.mealCalories !== null && parsed.mealProteinG !== null && parsed.mealCarbohydratesG !== null && parsed.mealFatG !== null) {
-      return finish(parsed.message, { type: 'log_meal', meal: { name: parsed.mealName, mealType: parsed.mealType, occurredAt: parsed.mealOccurredAt, calories: Math.max(0, Math.round(parsed.mealCalories)), proteinG: Math.max(0, Math.round(parsed.mealProteinG * 10) / 10), carbohydratesG: Math.max(0, Math.round(parsed.mealCarbohydratesG * 10) / 10), fatG: Math.max(0, Math.round(parsed.mealFatG * 10) / 10) } });
+    if (parsed.actionType === 'log_meal' && parsed.mealName && parsed.mealType && parsed.mealCalories !== null && parsed.mealProteinG !== null && parsed.mealCarbohydratesG !== null && parsed.mealFatG !== null) {
+      const occurredAt = parsed.mealOccurredAt && Number.isFinite(Date.parse(parsed.mealOccurredAt)) ? new Date(parsed.mealOccurredAt).toISOString() : new Date(context.currentDateTime).toISOString();
+      return finish(parsed.message, { type: 'log_meal', meal: { name: parsed.mealName, mealType: parsed.mealType, occurredAt, calories: Math.max(0, Math.round(parsed.mealCalories)), proteinG: Math.max(0, Math.round(parsed.mealProteinG * 10) / 10), carbohydratesG: Math.max(0, Math.round(parsed.mealCarbohydratesG * 10) / 10), fatG: Math.max(0, Math.round(parsed.mealFatG * 10) / 10) } });
     }
     if (parsed.actionType === 'log_workout' && parsed.workoutTitle && parsed.workoutActivityType && parsed.workoutOccurredAt && parsed.workoutDurationMinutes !== null && parsed.workoutCaloriesBurned !== null && parsed.workoutPerceivedEffort !== null) {
       const durationMinutes = Math.max(1, Math.round(parsed.workoutDurationMinutes));
@@ -323,7 +340,7 @@ export class OpenAiCoachProvider {
     if (parsed.actionType === 'replace_plan_ingredient' && parsed.ingredientToReplace && parsed.replacementIngredient) {
       return finish(parsed.message, { type: 'replace_plan_ingredient', change: { slotId: parsed.planSlotId ?? undefined, ingredientToReplace: parsed.ingredientToReplace, replacementIngredient: parsed.replacementIngredient } });
     }
-    const claimedWithoutAction = /\b(?:he\s+)?(?:registrad[oa]|agregad[oa]|anadid[oa])\b/i.test(parsed.message);
+    const claimedWithoutAction = /\b(?:he\s+)?(?:registre|registrad[oa]|agregue|agregad[oa]|anadi|anadid[oa])\b/.test(parsed.message.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
     return finish(claimedWithoutAction
       ? (context.locale === 'en-US' ? 'I could not complete that registration. Please tell me the food and amount again.' : 'No pude completar ese registro. Dime nuevamente el alimento y la cantidad para guardarlo correctamente.')
       : parsed.message, null);

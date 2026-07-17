@@ -11,7 +11,8 @@
     "start": "tsx src/index.ts",
     "import:off": "node scripts/import-open-food-facts.mjs",
     "import:profeco": "node scripts/import-profeco-prices.mjs",
-    "import:inpc": "node scripts/import-inegi-inpc.mjs"
+    "import:inpc": "node scripts/import-inegi-inpc.mjs",
+    "sync:static-media": "node scripts/sync-static-media.mjs"
   },
   "dependencies": {
     "@apple/app-store-server-library": "3.1.0",

@@ -7,7 +7,8 @@ import { BrandMark } from '../components/BrandMark';
 import { resolveUiLocale } from '../config/appFeatures';
 import { localFoodCatalog } from '../data/foodCatalog';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { analyzeFoodPhoto, fetchMealImages, findFoodByBarcode, searchFoods } from '../services/api';
+import { mealImageUrls } from '../data/staticMedia';
+import { analyzeFoodPhoto, findFoodByBarcode, searchFoods } from '../services/api';
 import { prepareFoodPhoto } from '../services/imageCompression';
 import { pickNativePhoto } from '../services/nativeCamera';
 import { isNativeIos } from '../services/nativePlatform';
@@ -73,7 +74,7 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
   const [personal, setPersonal] = useState(EMPTY_PERSONAL);
   const [editingId, setEditingId] = useState<string | undefined>();
   const [editingMeal, setEditingMeal] = useState<MealEntry | null>(null);
-  const [mealImages, setMealImages] = useState<Record<string, string>>({});
+  const mealImages = mealImageUrls;
   const [periodMode, setPeriodMode] = useState<PeriodMode>('day');
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const period = useMemo(() => nutritionPeriod(anchorDate, periodMode), [anchorDate, periodMode]);
@@ -104,12 +105,6 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
   const currentDay = periodMode === 'day' && localDateKey(anchorDate) === localDateKey();
   const dailyPlan = useMemo(() => (isPremium && currentDay ? dailyMealPlanFromWeek(weeklyMealPlanForDate(snapshot.mealPlans, anchorDate), anchorDate) : null), [isPremium, currentDay, snapshot.mealPlans, anchorDate]);
 
-  useEffect(() => {
-    if (isPremium)
-      fetchMealImages()
-        .then(setMealImages)
-        .catch(() => undefined);
-  }, [isPremium]);
   useEffect(() => {
     if (mode !== 'photo' || isPremium) return;
     setMode(null);
@@ -843,7 +838,7 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
 
 function MealPlanSlotCard({ slot, selected, imageUrls, onChoose, onUndo }: { slot: DailyMealPlanSlot; selected?: MealEntry; imageUrls: Record<string, string>; onChoose(index: 0 | 1): void; onUndo(id: string): void }) {
   const selectedOption = selected ? slot.options.find((option) => option.id === selected.planOptionId) : undefined;
-  const selectedImage = selectedOption ? (selectedOption.imageUrl ?? imageUrls[selectedOption.id]) : null;
+  const selectedImage = selectedOption ? (imageUrls[selectedOption.id] ?? selectedOption.imageUrl) : null;
   return (
     <article className={`meal-plan-slot${selected ? ' meal-plan-slot--completed' : ''}`}>
       <header>
@@ -872,7 +867,7 @@ function MealPlanSlotCard({ slot, selected, imageUrls, onChoose, onUndo }: { slo
       ) : (
         <div className="meal-option-grid">
           {slot.options.map((option, index) => {
-            const imageUrl = option.imageUrl ?? imageUrls[option.id];
+            const imageUrl = imageUrls[option.id] ?? option.imageUrl;
             return (
               <details className={`meal-option${slot.selectedOptionIndex === index ? ' is-selected' : ''}`} key={`${slot.id}-${option.id}-${index}`}>
                 <summary>

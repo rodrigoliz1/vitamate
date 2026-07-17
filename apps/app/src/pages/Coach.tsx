@@ -1104,6 +1104,9 @@ function VoiceCall({ open, english, getContext, onClose, onExhausted, onAction, 
         try {
           const payload = JSON.parse(String(event.data)) as {
             type?: string;
+            call_id?: string;
+            name?: string;
+            arguments?: string;
             error?: { message?: string };
             session?: { audio?: { output?: { voice?: string } } };
             response?: {
@@ -1150,6 +1153,9 @@ function VoiceCall({ open, english, getContext, onClose, onExhausted, onAction, 
             speakingRef.current = true;
             setStatus(english ? 'VITACOACH is speaking…' : 'VITACOACH está respondiendo…');
             void audio.play().catch(() => undefined);
+          }
+          if (payload.type === 'response.function_call_arguments.done' && payload.call_id && payload.name) {
+            void resolveToolCall(payload.call_id, payload.name, payload.arguments ?? '{}');
           }
           if (payload.type === 'response.done') {
             usageRef.current = accumulateRealtimeUsage(usageRef.current, payload.response?.usage);

@@ -3,7 +3,18 @@ import type { CoachReply } from '../providers/openaiCoach.js';
 import type { NormalizedFood } from '../types.js';
 
 const foods = new FoodRepository();
-const COMMON_PORTION_GRAMS: Record<string, number> = { apple: 180, banana: 118, egg: 50, 'corn-tortilla': 28, avocado: 150 };
+const COMMON_PORTION_GRAMS: Record<string, number> = {
+  apple: 180,
+  banana: 118,
+  egg: 50,
+  'corn-tortilla': 28,
+  'flour-tortilla': 45,
+  beans: 120,
+  avocado: 150,
+  machaca: 100,
+  beef: 100,
+  'salsa-macha': 15,
+};
 
 export async function tryDeterministicCoachReply(message: string, currentDateTime: string, timezone: string, locale: 'es-MX' | 'en-US'): Promise<CoachReply | null> {
   const sleep = extractSleepLog(message);
@@ -28,6 +39,9 @@ export async function tryDeterministicCoachReply(message: string, currentDateTim
       action: { type: 'log_workout', workout: { title: workout.title, activityType: workout.activityType, occurredAt: new Date(currentDateTime).toISOString(), durationMinutes: workout.durationMinutes, caloriesBurned, perceivedEffort: workout.perceivedEffort } },
     };
   }
+
+  const compositeMeal = await extractCompositeMealLog(message, currentDateTime, timezone, locale);
+  if (compositeMeal) return compositeMeal;
 
   const lookup = extractLookup(message);
   if (lookup) {
@@ -57,6 +71,124 @@ export async function tryDeterministicCoachReply(message: string, currentDateTim
     ...noModelReply(replyMessage, 'meal_log'),
     action: { type: 'log_meal', meal: { name: `${food.name} · ${Math.round(grams)} g`, mealType, occurredAt, ...macros } },
   };
+}
+
+async function extractCompositeMealLog(message: string, currentDateTime: string, timezone: string, locale: 'es-MX' | 'en-US'): Promise<CoachReply | null> {
+  const parsed = consumedMealDescription(message);
+  if (!parsed) return null;
+  const segments = parsed.description
+    .replace(/\s+(?:y|e|con)\s+/gi, ',')
+    .split(/[,;]+/)
+    .map((item) => item.trim().replace(/^(?:y|e)\s+/i, ''))
+    .filter(Boolean);
+  if (!segments.length || segments.length > 12) return null;
+  const ingredients = await Promise.all(segments.map(resolveMealIngredient));
+  if (ingredients.some((ingredient) => !ingredient)) return null;
+  const resolved = ingredients.filter((ingredient): ingredient is NonNullable<typeof ingredient> => Boolean(ingredient));
+  const totals = resolved.reduce(
+    (summary, ingredient) => ({
+      calories: summary.calories + ingredient.macros.calories,
+      proteinG: summary.proteinG + ingredient.macros.proteinG,
+      carbohydratesG: summary.carbohydratesG + ingredient.macros.carbohydratesG,
+      fatG: summary.fatG + ingredient.macros.fatG,
+    }),
+    { calories: 0, proteinG: 0, carbohydratesG: 0, fatG: 0 },
+  );
+  const mealType = parsed.mealType ?? inferMealType(new Date(currentDateTime), timezone);
+  const mealName = segments.join(', ').slice(0, 180);
+  const rounded = {
+    calories: Math.round(totals.calories),
+    proteinG: Math.round(totals.proteinG * 10) / 10,
+    carbohydratesG: Math.round(totals.carbohydratesG * 10) / 10,
+    fatG: Math.round(totals.fatG * 10) / 10,
+  };
+  const replyMessage = locale === 'en-US'
+    ? `I registered ${mealName} as an estimate: ${rounded.calories} kcal and ${rounded.proteinG} g protein. You can edit or undo it.`
+    : `Registré ${mealName} como estimación: ${rounded.calories} kcal y ${rounded.proteinG} g de proteína. Puedes editarlo o deshacerlo.`;
+  return {
+    ...noModelReply(replyMessage, 'meal_log'),
+    action: {
+      type: 'log_meal',
+      meal: {
+        name: mealName,
+        mealType,
+        occurredAt: new Date(currentDateTime).toISOString(),
+        ...rounded,
+      },
+    },
+  };
+}
+
+function consumedMealDescription(message: string): { description: string; mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack' | null } | null {
+  const text = message.trim().replace(/[.!?]+$/, '');
+  const consumed = text.match(/^(?:(?:hoy|ya)\s+)?(?:me\s+)?(desayun[eé]|almorc[eé]|com[ií]|cen[eé]|tom[eé]|beb[ií])\s+(.+)$/i);
+  if (consumed?.[2]) {
+    const verb = normalizeFoodText(consumed[1]);
+    return {
+      description: consumed[2],
+      mealType: verb.startsWith('desayun') ? 'breakfast' : verb.startsWith('cen') ? 'dinner' : verb.startsWith('almorc') || verb === 'comi' ? 'lunch' : 'snack',
+    };
+  }
+  const described = text.match(/^(?:mi\s+)?(desayuno|comida|almuerzo|cena|colaci[oó]n)\s+(?:fue|era|consisti[oó]|incluy[oó]|ten[ií]a)\s+(.+)$/i);
+  if (described?.[2]) {
+    const noun = normalizeFoodText(described[1]);
+    return { description: described[2], mealType: noun === 'desayuno' ? 'breakfast' : noun === 'cena' ? 'dinner' : noun === 'colacion' ? 'snack' : 'lunch' };
+  }
+  const requested = text.match(/^(?:registra|reg[ií]strame|agrega|agr[eé]game|a[nñ]ade)\s+(?:(?:mi|el|la)\s+)?(?:(desayuno|comida|almuerzo|cena|colaci[oó]n)\s+)?(.+)$/i);
+  if (!requested?.[2]) return null;
+  const noun = normalizeFoodText(requested[1] ?? '');
+  return { description: requested[2], mealType: noun === 'desayuno' ? 'breakfast' : noun === 'cena' ? 'dinner' : noun === 'colacion' ? 'snack' : noun ? 'lunch' : null };
+}
+
+async function resolveMealIngredient(segment: string): Promise<{ macros: ReturnType<typeof macrosFor> } | null> {
+  const normalized = normalizeFoodText(segment);
+  let quantity = 1;
+  let unit: 'count' | 'g' = 'count';
+  let query = normalized;
+  if (/^(?:un|una)\s+poco\s+de\s+/.test(query)) {
+    quantity = 15;
+    unit = 'g';
+    query = query.replace(/^(?:un|una)\s+poco\s+de\s+/, '');
+  } else if (/^(?:una?\s+)?guarnicion\s+de\s+/.test(query)) {
+    quantity = 120;
+    unit = 'g';
+    query = query.replace(/^(?:una?\s+)?guarnicion\s+de\s+/, '');
+  } else {
+    const amount = query.match(/^(\d+(?:[.,]\d+)?)\s*(kg|kilos?|g|gramos?|ml|mililitros?)?\s*(?:de\s+)?(.+)$/);
+    if (amount?.[3]) {
+      quantity = Number(amount[1].replace(',', '.'));
+      const rawUnit = amount[2] ?? '';
+      unit = rawUnit ? 'g' : 'count';
+      if (rawUnit.startsWith('k')) quantity *= 1_000;
+      query = amount[3];
+    } else {
+      const wordAmount = query.match(/^(un|una|dos|tres|cuatro|cinco|seis)\s+(.+)$/);
+      if (wordAmount?.[2]) {
+        quantity = ({ un: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 } as Record<string, number>)[wordAmount[1]];
+        query = wordAmount[2];
+      }
+    }
+  }
+  const food = await bestFood(canonicalFoodQuery(query));
+  if (!food) return null;
+  const grams = unit === 'g' ? quantity : (COMMON_PORTION_GRAMS[food.externalId ?? ''] ?? food.servingWeightGrams ?? 100) * quantity;
+  return { macros: macrosFor(food, grams) };
+}
+
+function canonicalFoodQuery(value: string): string {
+  const query = normalizeFoodText(value).replace(/^(?:el|la|los|las|de)\s+/, '').trim();
+  if (/tortilla.*(?:maiz|mais)/.test(query)) return 'tortilla de maiz';
+  if (/tortilla.*harina/.test(query)) return 'tortilla de harina';
+  if (/huevo/.test(query)) return 'huevo';
+  if (/frijol/.test(query)) return 'frijoles';
+  if (/machaca/.test(query)) return 'machaca';
+  if (/salsa\s+macha/.test(query)) return 'salsa macha';
+  if (/carne|res/.test(query)) return 'carne de res';
+  return query.replace(/\b(cocid[ao]s?|cru[do]s?)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeFoodText(value: string): string {
+  return value.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
 
 function extractDurationMinutes(message: string): number | null {

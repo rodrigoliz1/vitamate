@@ -7,7 +7,7 @@ import { ExerciseGuide } from '../components/ExerciseGuide';
 import { GuidedWorkout, GuidedWorkoutBoundary } from '../components/GuidedWorkout';
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { fetchExerciseGuides } from '../services/api';
+import { exerciseGuideUrls } from '../data/staticMedia';
 
 interface Props {
   snapshot: VitamateSnapshot;
@@ -28,18 +28,13 @@ interface Props {
 
 const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkout }: Props) => {
   const [activeDay, setActiveDay] = useState<WorkoutDay | null>(null);
-  const [guides, setGuides] = useState<Record<string, string>>({});
+  const guides = exerciseGuideUrls;
   const [editing, setEditing] = useState<WorkoutSession | null>(null);
   const profile = snapshot.profile;
   const [environment, setEnvironment] = useState<TrainingEnvironment>(() => (profile?.trainingPreference === 'home' ? 'home' : 'gym'));
   const plan = useMemo(() => (profile ? generateStarterWorkoutPlan(profile, new Date(), environment) : snapshot.workoutPlan), [profile, environment, snapshot.workoutPlan]);
   const weekly = sessionsThisWeek(snapshot.workoutSessions);
   const balance = profile ? buildWeeklyWorkoutBalance(profile, snapshot.workoutSessions) : null;
-  useEffect(() => {
-    fetchExerciseGuides()
-      .then(setGuides)
-      .catch(() => undefined);
-  }, []);
   useEffect(() => {
     document.body.classList.toggle('guided-workout-active', Boolean(activeDay));
     return () => document.body.classList.remove('guided-workout-active');

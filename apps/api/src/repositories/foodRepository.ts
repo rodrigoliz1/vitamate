@@ -27,8 +27,8 @@ const toRow = (food: NormalizedFood) => ({
 
 export class FoodRepository {
   async search(query: string, limit = 30): Promise<NormalizedFood[]> {
-    const normalized = query.trim().toLocaleLowerCase('es-MX');
-    const curated = curatedFoods.filter((food) => food.name.toLocaleLowerCase('es-MX').includes(normalized));
+    const normalized = normalizeSearch(query);
+    const curated = curatedFoods.filter((food) => normalizeSearch(food.name).includes(normalized));
     if (!supabaseAdmin) return curated.slice(0, limit);
     const safe = normalized.replaceAll(',', ' ').replaceAll('%', '');
     const { data, error } = await supabaseAdmin.from('foods').select('*').neq('quality_status', 'rejected').ilike('search_text', `%${safe}%`).limit(limit * 2);
@@ -60,11 +60,15 @@ export class FoodRepository {
 }
 
 function foodSearchScore(food: NormalizedFood, query: string): number {
-  const name = food.name.toLocaleLowerCase('es-MX');
+  const name = normalizeSearch(food.name);
   const hasUsefulNutrition = [food.caloriesPer100g, food.proteinPer100g, food.carbohydratesPer100g, food.fatPer100g]
     .some((value) => typeof value === 'number' && value > 0);
   return (food.source === 'vitamate' ? 50 : 0)
     + (name === query ? 30 : name.startsWith(query) ? 20 : 0)
     + (food.qualityStatus === 'complete' ? 10 : 0)
     + (hasUsefulNutrition ? 20 : 0);
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }

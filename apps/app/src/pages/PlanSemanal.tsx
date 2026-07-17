@@ -4,7 +4,8 @@ import { cartOutline, chatbubbleEllipsesOutline, chevronBack, chevronForward, cl
 import { buildWeeklyGroceryList, weeklyMealPlanForDate, type GroceryEstimate, type GroceryIngredientEstimate, type UserProfile } from '@vitamate/domain';
 import { BrandMark } from '../components/BrandMark';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { estimateGroceryCost, fetchMealImages } from '../services/api';
+import { mealImageUrls } from '../data/staticMedia';
+import { estimateGroceryCost } from '../services/api';
 
 const CHECKED_KEY = 'vitamate.weekly-grocery-checked.v1';
 const MARKET_PREFS_KEY = 'vitamate.market-location.v1';
@@ -26,7 +27,7 @@ const unitLabel = (quantity: number, unit: 'g' | 'ml' | 'pieza') => unit === 'pi
 const confidenceLabel = (value: GroceryEstimate['confidence']) => ({ high: 'Alta', medium: 'Media', low: 'Baja', unavailable: 'Sin datos' }[value]);
 
 const PlanSemanal = ({ snapshot, onUpdateProfile, onSelectMealPlanOption }: { snapshot: VitamateSnapshot; onUpdateProfile(profile: UserProfile): void; onSelectMealPlanOption(slotId: string, optionIndex: 0 | 1): void }) => {
-  const [images, setImages] = useState<Record<string, string>>({});
+  const images = mealImageUrls;
   const [checked, setChecked] = useState<Record<string, boolean>>(() => stored(CHECKED_KEY, {}));
   const [activeDay, setActiveDay] = useState(() => (new Date().getDay() + 6) % 7);
   const [groceryOpen, setGroceryOpen] = useState(false);
@@ -38,7 +39,6 @@ const PlanSemanal = ({ snapshot, onUpdateProfile, onSelectMealPlanOption }: { sn
   const profile = snapshot.profile!;
   const [budgetDraft, setBudgetDraft] = useState(String(profile.weeklyFoodBudgetMxn));
 
-  useEffect(() => { fetchMealImages().then(setImages).catch(() => undefined); }, []);
   useEffect(() => { window.localStorage.setItem(CHECKED_KEY, JSON.stringify(checked)); }, [checked]);
   useEffect(() => { window.localStorage.setItem(MARKET_PREFS_KEY, JSON.stringify(marketPrefs)); }, [marketPrefs]);
 
@@ -81,7 +81,7 @@ const PlanSemanal = ({ snapshot, onUpdateProfile, onSelectMealPlanOption }: { sn
       <header className="app-header"><BrandMark compact /><IonRouterLink routerLink="/nutricion" className="back-link"><IonIcon icon={chevronBack} /> Nutrición</IonRouterLink></header>
       <section className="weekly-plan-hero"><div><p className="eyebrow">Lista semanal del súper</p><h1>Tu semana, resuelta</h1><p>Comidas de lunes a domingo y cantidades consolidadas según tus metas y preferencias.</p></div><button className="weekly-budget-button" onClick={() => { setBudgetDraft(String(profile.weeklyFoodBudgetMxn)); setBudgetOpen(true); }}><IonIcon icon={cartOutline} />{estimateLoading ? <IonSpinner /> : <strong>{money(planCost)}</strong>}<span>{estimate?.unpricedItems ? `estimado parcial · ${estimate.unpricedItems} sin referencia` : 'estimado semanal · presupuesto ' + profile.weeklyFoodBudgetMxn.toLocaleString('es-MX')}</span><small>Ajustar presupuesto <IonIcon icon={chevronForward} /></small></button></section>
       <nav className="week-day-tabs" aria-label="Días del plan">{plan.days.map((item, index) => <button key={item.dateKey} className={index === activeDay ? 'is-active' : ''} onClick={() => setActiveDay(index)}><span>{item.label.slice(0, 3)}</span><small>{new Date(`${item.dateKey}T12:00:00`).getDate()}</small></button>)}</nav>
-      <section className="weekly-day-plan"><header><div><p className="eyebrow">{day.label}</p><h2>Plan del día</h2></div><span>{day.plan.target?.calories ?? '—'} kcal</span></header>{day.plan.meals.map((slot) => { const index = slot.selectedOptionIndex ?? 0; const option = slot.options[index]; const imageUrl = option.imageUrl ?? images[option.id]; return <article className="weekly-meal-card" key={slot.id}><span className="weekly-meal-image">{imageUrl ? <img src={imageUrl} alt={option.name} /> : <IonIcon icon={restaurantOutline} />}</span><div><small>{slot.label} · opción {index + 1}</small><strong>{option.name}</strong><span>{option.calories} kcal · {option.proteinG}g P · {option.prepMinutes} min</span><details><summary>Ver ingredientes y receta</summary><ul>{option.ingredients.map((ingredient) => <li key={ingredient}>{ingredient}</li>)}</ul><ol>{option.steps.map((step) => <li key={step}>{step}</li>)}</ol></details></div><div className="weekly-meal-actions"><button onClick={() => onSelectMealPlanOption(slot.id, index === 0 ? 1 : 0)}><IonIcon icon={refreshOutline} /> Cambiar comida</button><IonRouterLink routerLink={`/coach?planAction=replace_meal&planSlotId=${encodeURIComponent(slot.id)}&draft=${encodeURIComponent(`Cambia ${option.name} del ${day.label} por otra comida compatible con aproximadamente ${option.calories} kcal y ${option.proteinG} g de proteína. Aplica el cambio a mi plan.`)}`}><IonIcon icon={chatbubbleEllipsesOutline} /> Pedir otra sugerencia</IonRouterLink></div></article>; })}</section>
+      <section className="weekly-day-plan"><header><div><p className="eyebrow">{day.label}</p><h2>Plan del día</h2></div><span>{day.plan.target?.calories ?? '—'} kcal</span></header>{day.plan.meals.map((slot) => { const index = slot.selectedOptionIndex ?? 0; const option = slot.options[index]; const imageUrl = images[option.id] ?? option.imageUrl; return <article className="weekly-meal-card" key={slot.id}><span className="weekly-meal-image">{imageUrl ? <img src={imageUrl} alt={option.name} /> : <IonIcon icon={restaurantOutline} />}</span><div><small>{slot.label} · opción {index + 1}</small><strong>{option.name}</strong><span>{option.calories} kcal · {option.proteinG}g P · {option.prepMinutes} min</span><details><summary>Ver ingredientes y receta</summary><ul>{option.ingredients.map((ingredient) => <li key={ingredient}>{ingredient}</li>)}</ul><ol>{option.steps.map((step) => <li key={step}>{step}</li>)}</ol></details></div><div className="weekly-meal-actions"><button onClick={() => onSelectMealPlanOption(slot.id, index === 0 ? 1 : 0)}><IonIcon icon={refreshOutline} /> Cambiar comida</button><IonRouterLink routerLink={`/coach?planAction=replace_meal&planSlotId=${encodeURIComponent(slot.id)}&draft=${encodeURIComponent(`Cambia ${option.name} del ${day.label} por otra comida compatible con aproximadamente ${option.calories} kcal y ${option.proteinG} g de proteína. Aplica el cambio a mi plan.`)}`}><IonIcon icon={chatbubbleEllipsesOutline} /> Pedir otra sugerencia</IonRouterLink></div></article>; })}</section>
       <button className="grocery-summary-card" onClick={() => setGroceryOpen(true)}><span><IonIcon icon={cartOutline} /></span><div><small>Lista semanal del súper</small><strong>{grocery.items.length} productos · {estimateLoading ? 'calculando…' : `${money(planCost)} estimados`}</strong><p>{Object.values(checked).filter(Boolean).length} marcados. El cálculo queda fijo esta semana mientras no cambies el plan, la ubicación o el presupuesto.</p></div><IonIcon icon={chevronForward} /></button>
     </main></IonContent></IonPage>
 
