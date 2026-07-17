@@ -237,7 +237,7 @@ export function registerPushDevice(input: { token: string; platform: 'ios'; envi
   });
 }
 
-export async function searchFoods(query: string, external = false): Promise<FoodCatalogItem[]> {
+export async function searchFoods(query: string, external = true): Promise<FoodCatalogItem[]> {
   const data = await request<{ items: FoodCatalogItem[] }>(`/v1/foods/search?q=${encodeURIComponent(query)}&external=${external}`);
   return data.items;
 }

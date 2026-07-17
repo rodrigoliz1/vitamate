@@ -114,15 +114,25 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
   useEffect(() => {
     const local = localFoodCatalog.filter((food) => food.name.toLocaleLowerCase('es-MX').includes(query.toLocaleLowerCase('es-MX')));
     setResults(local);
-    if (query.trim().length < 2) return;
+    if (query.trim().length < 2) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
     const timer = window.setTimeout(async () => {
+      if (!cancelled) setLoading(true);
       try {
         setResults(await searchFoods(query.trim()));
       } catch {
         /* Offline catalog stays available. */
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }, 650);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [query]);
 
   const selectCatalogFood = (food: FoodCatalogItem) => {
@@ -524,7 +534,7 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
                   <button onClick={() => setMode('search')}>
                     <IonIcon icon={searchOutline} />
                     <strong>Buscar</strong>
-                    <span>Catálogo VITAMATE y USDA.</span>
+                    <span>Catálogo VITAMATE y USDA, consultados automáticamente.</span>
                   </button>
                   <button onClick={() => setMode('barcode')}>
                     <IonIcon icon={barcodeOutline} />
@@ -544,6 +554,7 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
                     <span>Nombre o marca</span>
                     <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ej. pollo, tortilla, yogurt" />
                   </label>
+                  {loading && <p className="source-attribution">Buscando en VITAMATE y USDA…</p>}
                   <div className="food-results">
                     {results.map((food, index) => (
                       <button key={`${food.source}-${food.id ?? food.name}-${index}`} onClick={() => selectCatalogFood(food)}>
@@ -560,25 +571,6 @@ const Nutricion = ({ snapshot, isPremium, onRequestPremium, onAddMeal, onUpdateM
                       </button>
                     ))}
                   </div>
-                  {query.length >= 2 && (
-                    <IonButton
-                      fill="outline"
-                      expand="block"
-                      disabled={loading}
-                      onClick={async () => {
-                        setLoading(true);
-                        try {
-                          setResults(await searchFoods(query, true));
-                        } catch (error) {
-                          setMessage(error instanceof Error ? error.message : 'No fue posible consultar USDA.');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                    >
-                      {loading ? <IonSpinner /> : 'Buscar también en USDA'}
-                    </IonButton>
-                  )}
                 </section>
               )}
               {mode === 'barcode' && (

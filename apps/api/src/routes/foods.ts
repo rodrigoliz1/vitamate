@@ -19,14 +19,29 @@ const vision = new OpenAiFoodVisionProvider();
 
 export async function foodRoutes(app: FastifyInstance) {
   app.get('/v1/foods/search', async (request, reply) => {
-    const { q, external } = z.object({ q: z.string().trim().min(2).max(100), external: z.enum(['true', 'false']).default('false') }).parse(request.query);
+    const { q, external } = z.object({ q: z.string().trim().min(2).max(100), external: z.enum(['true', 'false']).default('true') }).parse(request.query);
     const internal = await repository.search(q);
     if (external !== 'true') return { items: internal.map(toPublicFood), source: 'internal' };
-    if (!await allowPersistentRequest(`usda:${request.ip}`, 10)) return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Espera un minuto antes de otra búsqueda externa.' });
-    const items = await usda.search(q);
-    const saved = await Promise.all(items.slice(0, 20).map((item) => repository.upsert(item)));
-    const combined = [...internal, ...saved].filter((item, index, all) => all.findIndex((candidate) => candidate.source === item.source && candidate.externalId === item.externalId) === index);
-    return { items: combined.map(toPublicFood), source: 'internal+usda' };
+    // El catálogo local siempre es la respuesta base. USDA lo complementa de forma
+    // transparente cuando está disponible, sin convertir una caída externa en un error de UI.
+    if (!usda.isConfigured) {
+      request.log.warn('USDA no está configurado; se respondió sólo con el catálogo VITAMATE.');
+      return { items: internal.map(toPublicFood), source: 'internal', externalStatus: 'unavailable' };
+    }
+    if (!await allowPersistentRequest(`usda:${request.ip}`, 20)) {
+      return { items: internal.map(toPublicFood), source: 'internal', externalStatus: 'rate_limited' };
+    }
+
+    try {
+      const items = await usda.search(q);
+      const stored = await Promise.allSettled(items.slice(0, 20).map((item) => repository.upsert(item)));
+      const saved = stored.map((result, index) => result.status === 'fulfilled' ? result.value : items[index]);
+      const combined = [...internal, ...saved].filter((item, index, all) => all.findIndex((candidate) => candidate.source === item.source && candidate.externalId === item.externalId) === index);
+      return { items: combined.map(toPublicFood), source: 'internal+usda', externalStatus: 'ok' };
+    } catch (error) {
+      request.log.warn({ error, query: q }, 'No fue posible complementar la búsqueda con USDA.');
+      return { items: internal.map(toPublicFood), source: 'internal', externalStatus: 'unavailable' };
+    }
   });
 
   app.get('/v1/foods/barcode/:barcode', async (request, reply) => {
