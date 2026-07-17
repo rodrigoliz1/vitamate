@@ -11,7 +11,29 @@ export const metadata: Metadata = {
   description: "Entrenamiento, nutrición y acompañamiento personal con IA en una sola experiencia.",
   applicationName: "VITAMATE",
   keywords: ["entrenamiento personalizado", "nutrición", "coach IA", "macronutrientes", "bienestar"],
-  openGraph: { title: "VITAMATE", description: "Tu entrenamiento, tu alimentación y VITACOACH, juntos.", type: "website", locale: "es_MX", siteName: "VITAMATE" },
+  icons: {
+    icon: [
+      { url: "/favicon.svg?v=vitamate-20260716", type: "image/svg+xml" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    shortcut: "/favicon.svg?v=vitamate-20260716",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  openGraph: {
+    title: "VITAMATE",
+    description: "Tu entrenamiento, tu alimentación y VITACOACH, juntos.",
+    url: "/",
+    type: "website",
+    locale: "es_MX",
+    siteName: "VITAMATE",
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "VITAMATE — La vida fit que se adapta a tu vida" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "VITAMATE — La vida fit que se adapta a tu vida",
+    description: "Entrenamiento, nutrición y VITACOACH, juntos.",
+    images: ["/opengraph-image"],
+  },
   robots: { index: true, follow: true },
 };
 
