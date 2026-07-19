@@ -12,3 +12,7 @@ test('resuelve “regístralo” contra la última comida descrita por el usuari
     { role: 'assistant', content: 'Puedo estimarlo en aproximadamente 700 kcal.' },
   ]), 'meal_log');
 });
+
+test('clasifica una fotografía como registro visual antes de asumir comida o ejercicio', () => {
+  assert.equal(classifyCoachTask('Analiza esta imagen', { imageDataUrl: 'data:image/jpeg;base64,AA==' }), 'photo_log');
+});

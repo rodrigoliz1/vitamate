@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { calculateNutritionTarget, buildWorkoutFeedback, generateStarterWorkoutPlan, generateWeeklyMealPlan, replaceWeeklyMealPlanIngredient, replaceWeeklyMealPlanOption, selectWeeklyMealPlanOption, weeklyMealPlanForDate, type AppLocale, type CoachChatMessage, type CoachMemoryUpdate, type HealthDocumentSummary, type MealEntry, type MealPlanOption, type PersonalFood, type SleepEntry, type UserProfile, type WeightEntry, type WorkoutDay, type WorkoutExerciseResult, type WorkoutSession } from '@vitamate/domain';
 import { browserLocalRepository, type VitamateSnapshot } from '../data/localRepository';
+import { activeWorkoutRepository } from '../data/activeWorkoutRepository';
 import { fetchCloudSnapshot, reconcileCloudSnapshot } from '../services/cloudRepository';
 import { supabase, supabaseConfigured } from '../services/supabase';
 import { claimPromotionalTrial as claimRemotePromotionalTrial, deleteAccount as deleteRemoteAccount, fetchBillingStatus, reconcileCheckout as reconcileStripeCheckout, reconcileVoiceCheckout as reconcileStripeVoiceCheckout, registerAccount, requestAuthOtp, requestPasswordReset, resendRegistrationOtp, type BillingEntitlement, type BillingOffer, type OtpVerificationType, type PromotionalTrialOffer, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
@@ -1002,6 +1003,7 @@ export function useVitamate() {
     setCloudBusy(true);
     try {
       await supabase.auth.signOut();
+      activeWorkoutRepository.clear();
       setCloudMessage('Sesión cerrada. Tus datos locales permanecen en este dispositivo.');
     } finally {
       setCloudBusy(false);
@@ -1017,6 +1019,7 @@ export function useVitamate() {
       await supabase.auth.signOut({ scope: 'local' });
       const empty = browserLocalRepository.empty();
       browserLocalRepository.save(empty);
+      activeWorkoutRepository.clear();
       window.localStorage.removeItem(localSnapshotOwnerKey);
       latestSnapshot.current = empty;
       setSnapshot(empty);

@@ -5,7 +5,7 @@ import { OpenAiCoachProvider } from '../providers/openaiCoach.js';
 import { compactRealtimeCoachContext, compactCoachContext, selectRelevantMemories } from '../providers/coachContext.js';
 import { listCoachMessages, loadCoachState, loadMessagesForCoachSummary, persistCoachExchange, persistCoachSummary, seedCoachMemories } from '../repositories/coachRepository.js';
 import { allowPersistentRequest } from '../services/rateLimit.js';
-import { tryDeterministicCoachReply } from '../services/coachDeterministic.js';
+import { recalculateMealFromSources, tryDeterministicCoachReply } from '../services/coachDeterministic.js';
 import { recordAiUsage } from '../services/openaiUsage.js';
 import { config } from '../config.js';
 import { verifySupabaseAccessToken } from '../services/supabase.js';
@@ -248,6 +248,13 @@ const callEventSchema = z.object({
     .optional(),
 });
 const callSessionSchema = z.object({ callSessionId: z.string().uuid() });
+const recalculateMealSchema = z.object({
+  description: z.string().trim().min(2).max(500),
+  mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+  occurredAt: z.string().datetime(),
+  timezone: z.string().min(1).max(100),
+  locale: z.enum(['es-MX', 'en-US']).default('es-MX'),
+});
 
 async function authenticatedIdentity(request: { headers: { authorization?: string }; ip: string }) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -256,6 +263,17 @@ async function authenticatedIdentity(request: { headers: { authorization?: strin
 }
 
 export async function coachRoutes(app: FastifyInstance) {
+  app.post('/v1/coach/recalculate-meal', async (request, reply) => {
+    const { token, userId } = await authenticatedIdentity(request);
+    if (token && !userId) return reply.code(401).send({ code: 'INVALID_SESSION', message: 'Tu sesión venció. Vuelve a iniciar sesión.' });
+    if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Inicia sesión para recalcular este alimento.' });
+    await requirePremium(userId);
+    const body = recalculateMealSchema.parse(request.body);
+    const meal = await recalculateMealFromSources(body);
+    if (!meal) return reply.code(422).send({ code: 'FOOD_NOT_RESOLVED', message: 'No encontramos datos suficientes en las fuentes alimentarias. Puedes ajustar los valores manualmente.' });
+    return { meal, source: 'vitamate+external' };
+  });
+
   app.get('/v1/coach/history', async (request, reply) => {
     const { token, userId } = await authenticatedIdentity(request);
     if (token && !userId)

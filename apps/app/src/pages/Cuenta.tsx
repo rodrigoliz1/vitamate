@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { IonButton, IonContent, IonIcon, IonModal, IonPage, IonRouterLink, IonSpinner } from '@ionic/react';
-import { callOutline, cardOutline, chevronForward, closeOutline, cloudDoneOutline, mailOutline, personCircleOutline, settingsOutline, shieldCheckmarkOutline, trashOutline, warningOutline } from 'ionicons/icons';
+import { callOutline, cardOutline, chevronForward, closeOutline, cloudDoneOutline, logOutOutline, mailOutline, personCircleOutline, settingsOutline, shieldCheckmarkOutline, trashOutline, warningOutline } from 'ionicons/icons';
 import { BrandMark } from '../components/BrandMark';
 import { VoiceCreditsModal } from '../components/VoiceCreditsModal';
 import type { VitamateSnapshot } from '../data/localRepository';
@@ -16,6 +16,7 @@ interface Props {
   billingMessage: string;
   onOpenSubscription(): void;
   onPurchaseVoice(offer: VoiceCreditOffer): Promise<unknown>;
+  onSignOut(): Promise<void>;
   onDeleteAccount(): Promise<void>;
 }
 
@@ -29,12 +30,13 @@ const goalLabels: Record<string, string> = {
   strength: 'Ganar fuerza',
 };
 
-const Cuenta = ({ snapshot, cloudEmail, entitlement, voiceBalance, voiceOffers, billingBusy, billingMessage, onOpenSubscription, onPurchaseVoice, onDeleteAccount }: Props) => {
+const Cuenta = ({ snapshot, cloudEmail, entitlement, voiceBalance, voiceOffers, billingBusy, billingMessage, onOpenSubscription, onPurchaseVoice, onSignOut, onDeleteAccount }: Props) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [voiceCatalogOpen, setVoiceCatalogOpen] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
   const profile = snapshot.profile!;
   const periodActive = !entitlement?.currentPeriodEnd || Date.parse(entitlement.currentPeriodEnd) > Date.now();
   const premium = entitlement?.plan === 'premium' && ['active', 'trialing'].includes(entitlement.status) && periodActive;
@@ -117,6 +119,14 @@ const Cuenta = ({ snapshot, cloudEmail, entitlement, voiceBalance, voiceOffers, 
             </span>
             <IonIcon icon={chevronForward} />
           </IonRouterLink>
+          <button className="account-signout-link" type="button" disabled={signOutBusy} onClick={async () => {
+            setSignOutBusy(true);
+            try { await onSignOut(); } finally { setSignOutBusy(false); }
+          }}>
+            <IonIcon icon={logOutOutline} />
+            <span><strong>{signOutBusy ? 'Cerrando sesión…' : 'Cerrar sesión'}</strong><small>Puedes volver a entrar con tu correo cuando quieras.</small></span>
+            {signOutBusy && <IonSpinner />}
+          </button>
           <button className="account-delete-link" type="button" onClick={() => setDeleteOpen(true)}>
             <IonIcon icon={trashOutline} />
             Eliminar mi cuenta y mis datos

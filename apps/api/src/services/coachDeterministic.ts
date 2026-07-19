@@ -1,8 +1,10 @@
 import { FoodRepository } from '../repositories/foodRepository.js';
+import { UsdaProvider } from '../providers/usda.js';
 import type { CoachReply } from '../providers/openaiCoach.js';
 import type { NormalizedFood } from '../types.js';
 
 const foods = new FoodRepository();
+const usda = new UsdaProvider();
 const COMMON_PORTION_GRAMS: Record<string, number> = {
   apple: 180,
   banana: 118,
@@ -32,8 +34,8 @@ export async function tryDeterministicCoachReply(message: string, currentDateTim
   if (workout) {
     const caloriesBurned = Math.round(workout.durationMinutes * workout.kcalPerMinute);
     const replyMessage = locale === 'en-US'
-      ? `I registered ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} and an estimated ${caloriesBurned} active kcal. You can undo it if needed.`
-      : `Registré ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} y aproximadamente ${caloriesBurned} kcal activas. Puedes deshacerlo si hace falta.`;
+      ? `I prepared ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} and an estimated ${caloriesBurned} active kcal. Review it before saving.`
+      : `Preparé ${workout.title}: ${durationLabel(workout.durationMinutes, locale)} y aproximadamente ${caloriesBurned} kcal activas. Revísalo antes de guardarlo.`;
     return {
       ...noModelReply(replyMessage, 'workout_log'),
       action: { type: 'log_workout', workout: { title: workout.title, activityType: workout.activityType, occurredAt: new Date(currentDateTime).toISOString(), durationMinutes: workout.durationMinutes, caloriesBurned, perceivedEffort: workout.perceivedEffort } },
@@ -65,8 +67,8 @@ export async function tryDeterministicCoachReply(message: string, currentDateTim
   const occurredAt = new Date(currentDateTime).toISOString();
   const mealType = inferMealType(new Date(currentDateTime), timezone);
   const replyMessage = locale === 'en-US'
-    ? `I registered ${food.name} (${Math.round(grams)} g) as an estimate. You can undo it if the portion was different.`
-    : `Registré ${food.name} (${Math.round(grams)} g) como estimación. Puedes deshacerlo si la porción fue distinta.`;
+    ? `I prepared ${food.name} (${Math.round(grams)} g) as an editable estimate. Review the portion before saving.`
+    : `Preparé ${food.name} (${Math.round(grams)} g) como estimación editable. Revisa la porción antes de guardarla.`;
   return {
     ...noModelReply(replyMessage, 'meal_log'),
     action: { type: 'log_meal', meal: { name: `${food.name} · ${Math.round(grams)} g`, mealType, occurredAt, ...macros } },
@@ -103,8 +105,8 @@ async function extractCompositeMealLog(message: string, currentDateTime: string,
     fatG: Math.round(totals.fatG * 10) / 10,
   };
   const replyMessage = locale === 'en-US'
-    ? `I registered ${mealName} as an estimate: ${rounded.calories} kcal and ${rounded.proteinG} g protein. You can edit or undo it.`
-    : `Registré ${mealName} como estimación: ${rounded.calories} kcal y ${rounded.proteinG} g de proteína. Puedes editarlo o deshacerlo.`;
+    ? `I prepared ${mealName} as an editable estimate: ${rounded.calories} kcal and ${rounded.proteinG} g protein. Review it before saving.`
+    : `Preparé ${mealName} como estimación editable: ${rounded.calories} kcal y ${rounded.proteinG} g de proteína. Revísalo antes de guardarlo.`;
   return {
     ...noModelReply(replyMessage, 'meal_log'),
     action: {
@@ -255,7 +257,30 @@ function extractSimpleFoodLog(message: string): { food: string; quantity: number
 async function bestFood(query: string): Promise<NormalizedFood | null> {
   const normalized = query.toLocaleLowerCase('es-MX').replace(/\b(cocid[ao]|cru[doa])\b/g, ' ').replace(/\s+/g, ' ').trim();
   const results = await foods.search(normalized, 5);
-  return results.find((food) => food.caloriesPer100g !== null && food.proteinPer100g !== null && food.carbohydratesPer100g !== null && food.fatPer100g !== null) ?? null;
+  const local = results.find(hasCompleteMacros) ?? null;
+  // VITAMATE siempre tiene prioridad. USDA sólo completa huecos del catálogo y
+  // el resultado queda cacheado para que las consultas siguientes no dependan
+  // de una API externa ni consuman tokens de IA.
+  if (local || !usda.isConfigured) return local;
+  const external = (await usda.search(normalized, 5).catch(() => [])).find(hasCompleteMacros) ?? null;
+  return external ? foods.upsert(external).catch(() => external) : null;
+}
+
+function hasCompleteMacros(food: NormalizedFood): boolean {
+  return [food.caloriesPer100g, food.proteinPer100g, food.carbohydratesPer100g, food.fatPer100g]
+    .every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+export async function recalculateMealFromSources(input: {
+  description: string;
+  mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  occurredAt: string;
+  timezone: string;
+  locale: 'es-MX' | 'en-US';
+}) {
+  const label = ({ breakfast: 'desayuno', lunch: 'comida', dinner: 'cena', snack: 'colación' } as const)[input.mealType];
+  const reply = await tryDeterministicCoachReply(`Registra ${label} ${input.description}`, input.occurredAt, input.timezone, input.locale);
+  return reply?.action?.type === 'log_meal' ? { ...reply.action.meal, mealType: input.mealType, occurredAt: input.occurredAt } : null;
 }
 
 function macrosFor(food: NormalizedFood, grams: number) {

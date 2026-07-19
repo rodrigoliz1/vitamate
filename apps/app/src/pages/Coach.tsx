@@ -7,7 +7,7 @@ import { BrandMark } from '../components/BrandMark';
 import { VoiceCreditsModal } from '../components/VoiceCreditsModal';
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
-import { analyzeFoodPhoto, fetchCoachHistory, fetchRealtimeToken, heartbeatCoachCall, recordCoachCall, sendCoachMessage, startCoachCall, type CoachAction, type CoachChatContext, type PhotoAnalysis, type RealtimeCallUsage, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
+import { fetchCoachHistory, fetchRealtimeToken, heartbeatCoachCall, recalculateCoachMeal, recordCoachCall, sendCoachMessage, startCoachCall, type CoachAction, type CoachChatContext, type RealtimeCallUsage, type VoiceCreditBalance, type VoiceCreditOffer } from '../services/api';
 import { pickNativePhoto, type NativePhotoSource } from '../services/nativeCamera';
 import { isNativeIos } from '../services/nativePlatform';
 import { prepareFoodPhoto } from '../services/imageCompression';
@@ -40,12 +40,9 @@ interface CoachProps {
   onReplaceMealPlanIngredient(ingredientToReplace: string, replacementIngredient: string, slotId?: string): void;
 }
 
-interface PendingPhotoMeal {
-  preview: string;
-  analysis: PhotoAnalysis;
-  name: string;
-  mealType: MealType;
-}
+type PendingCoachRecord =
+  | { kind: 'meal'; preview?: string; source: 'chat' | 'photo'; meal: Extract<CoachAction, { type: 'log_meal' }>['meal']; sourceChecked: boolean }
+  | { kind: 'workout'; preview?: string; source: 'chat' | 'photo'; workout: Extract<CoachAction, { type: 'log_workout' }>['workout'] };
 
 function createId(): string {
   const cryptoApi = globalThis.crypto as Crypto | undefined;
@@ -60,14 +57,6 @@ function createId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const value = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
-}
-
-function inferMealType(date = new Date()): MealType {
-  const hour = date.getHours();
-  if (hour >= 5 && hour < 11) return 'breakfast';
-  if (hour >= 11 && hour < 17) return 'lunch';
-  if (hour >= 17 && hour < 23) return 'dinner';
-  return 'snack';
 }
 
 const MEAL_LABELS: Record<MealType, string> = {
@@ -85,7 +74,7 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [pendingMeal, setPendingMeal] = useState<PendingPhotoMeal | null>(null);
+  const [pendingRecord, setPendingRecord] = useState<PendingCoachRecord | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceCatalogOpen, setVoiceCatalogOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
@@ -265,7 +254,7 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
   useEffect(() => {
     const element = conversationRef.current;
     if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
-  }, [snapshot.coachMessages.length, busy, pendingMeal, lastAction]);
+  }, [snapshot.coachMessages.length, busy, pendingRecord, lastAction]);
 
   const applyCoachAction = (action: CoachAction): { success: true; message: string } => {
     if (action.type === 'log_meal') {
@@ -322,6 +311,32 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
     };
   };
 
+  const stageCoachAction = async (action: CoachAction, source: 'chat' | 'photo' = 'chat', preview?: string) => {
+    if (action.type === 'log_meal') {
+      setPendingRecord({ kind: 'meal', source, preview, meal: action.meal, sourceChecked: false });
+      try {
+        const result = await recalculateCoachMeal({
+          description: action.meal.name,
+          mealType: action.meal.mealType,
+          occurredAt: action.meal.occurredAt,
+          timezone: profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+          locale: uiLocale,
+        });
+        setPendingRecord((current) => current?.kind === 'meal'
+          ? { ...current, meal: { ...result.meal, mealType: current.meal.mealType, occurredAt: current.meal.occurredAt }, sourceChecked: true }
+          : current);
+      } catch {
+        // El usuario aún puede corregir los valores sugeridos manualmente.
+      }
+      return;
+    }
+    if (action.type === 'log_workout') {
+      setPendingRecord({ kind: 'workout', source, preview, workout: action.workout });
+      return;
+    }
+    applyCoachAction(action);
+  };
+
   const ask = async (
     content: string,
     options?: {
@@ -344,7 +359,7 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
     if (appendUser) onAppendMessages([userMessage]);
     try {
       const reply = await sendCoachMessage(context(content.trim()), history, content.trim(), options?.attachment, appendUser ? userMessage : undefined, snapshot.coachMemories);
-      if (reply.action) applyCoachAction(reply.action);
+      if (reply.action) await stageCoachAction(reply.action);
       onAppendMessages([
         reply.assistantMessage ?? {
           id: createId(),
@@ -376,19 +391,16 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
     const photoMessage: CoachChatMessage = {
       id: createId(),
       role: 'user',
-      content: '📷 Foto de alimento enviada',
+      content: '📷 Foto enviada a VITACOACH',
       createdAt: new Date().toISOString(),
     };
     onAppendMessages([photoMessage]);
     setBusy(true);
     setError('');
     try {
-      const analysis = await analyzeFoodPhoto(preview, uiLocale);
-      const mealType = inferMealType();
-      const name = analysis.items.map((item) => item.name).join(', ');
-      setPendingMeal({ preview, analysis, name, mealType });
-      const prompt = `El usuario acaba de enviar una foto de su alimento. La estimación visual (aún no confirmada) es: ${JSON.stringify({ name, mealType, totals: analysis.totals, confidence: analysis.overallConfidence, notes: analysis.notes })}. Dale retroalimentación breve y útil sobre cómo encaja con sus metas de hoy. Menciona que debe confirmar el registro y evita presentar la estimación como exacta.`;
-      const reply = await sendCoachMessage(context(prompt), snapshot.coachMessages, prompt, undefined, photoMessage, snapshot.coachMemories);
+      const prompt = `Analiza la imagen antes de asumir qué contiene. Si muestra una caminadora, reloj, bicicleta, máquina o resumen de actividad física ya realizada, lee únicamente las métricas visibles y devuelve log_workout. Si muestra comida o bebida ya consumida, devuelve log_meal. Si no es posible identificar un registro real, no devuelvas acción. En actividad usa el tiempo, calorías, distancia, velocidad e inclinación visibles para titular y estimar; no inventes datos ilegibles. En comida estima con prudencia. En ambos casos explica brevemente que preparaste un borrador editable que el usuario debe confirmar; todavía no digas que quedó registrado.`;
+      const reply = await sendCoachMessage(context(prompt), snapshot.coachMessages, prompt, preview, photoMessage, snapshot.coachMemories);
+      if (reply.action) await stageCoachAction(reply.action, 'photo', preview);
       onAppendMessages([
         reply.assistantMessage ?? {
           id: createId(),
@@ -424,24 +436,28 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
     }
   };
 
-  const confirmMeal = () => {
-    if (!pendingMeal) return;
-    onAddMeal({
-      name: pendingMeal.name,
-      occurredAt: new Date().toISOString(),
-      mealType: pendingMeal.mealType,
-      ...pendingMeal.analysis.totals,
-      source: 'photo',
+  const confirmPendingRecord = () => {
+    if (!pendingRecord) return;
+    if (pendingRecord.kind === 'workout') {
+      applyCoachAction({ type: 'log_workout', workout: pendingRecord.workout });
+      setPendingRecord(null);
+      return;
+    }
+    const pendingMeal = pendingRecord;
+    const id = onAddMeal({
+      ...pendingMeal.meal,
+      source: pendingMeal.source === 'photo' ? 'photo' : 'manual',
     });
     onAppendMessages([
       {
         id: createId(),
         role: 'assistant',
-        content: `${MEAL_LABELS[pendingMeal.mealType]} registrada. La tomaré en cuenta para las recomendaciones del resto del día.`,
+        content: `${MEAL_LABELS[pendingMeal.meal.mealType]} registrada. La tomaré en cuenta para las recomendaciones del resto del día.`,
         createdAt: new Date().toISOString(),
       },
     ]);
-    setPendingMeal(null);
+    setLastAction({ kind: 'meal', id, label: pendingMeal.meal.name });
+    setPendingRecord(null);
   };
 
   const handleHealthDocument = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -590,49 +606,41 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
                 </div>
               </article>
             ))}
-            {pendingMeal && (
+            {pendingRecord && (
               <article className="coach-food-confirmation">
-                <img src={pendingMeal.preview} alt="Alimento analizado" />
+                {pendingRecord.preview && <img src={pendingRecord.preview} alt={pendingRecord.kind === 'meal' ? 'Alimento analizado' : 'Actividad analizada'} />}
                 <div>
-                  <small>Estimación visual · {Math.round(pendingMeal.analysis.overallConfidence * 100)}% confianza</small>
-                  <label className="field">
-                    <span>Alimento</span>
-                    <input
-                      value={pendingMeal.name}
-                      onChange={(event) =>
-                        setPendingMeal({
-                          ...pendingMeal,
-                          name: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Momento detectado por la hora</span>
-                    <select
-                      value={pendingMeal.mealType}
-                      onChange={(event) =>
-                        setPendingMeal({
-                          ...pendingMeal,
-                          mealType: event.target.value as MealType,
-                        })
-                      }
-                    >
-                      {Object.entries(MEAL_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p>
-                    <strong>{pendingMeal.analysis.totals.calories} kcal</strong> · {pendingMeal.analysis.totals.proteinG}g P · {pendingMeal.analysis.totals.carbohydratesG}g C · {pendingMeal.analysis.totals.fatG}g G
-                  </p>
+                  <small>{pendingRecord.kind === 'meal' ? `Borrador de alimento${pendingRecord.sourceChecked ? ' · contrastado con fuentes' : ''}` : 'Borrador de actividad física'} · revisa antes de guardar</small>
+                  {pendingRecord.kind === 'meal' ? <>
+                    <label className="field"><span>Alimento y porciones</span><input value={pendingRecord.meal.name} onChange={(event) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, name: event.target.value }, sourceChecked: false })} /></label>
+                    <div className="form-grid">
+                      <label className="field"><span>Momento</span><select value={pendingRecord.meal.mealType} onChange={(event) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, mealType: event.target.value as MealType } })}>{Object.entries(MEAL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                      <label className="field"><span>Fecha y hora</span><input type="datetime-local" value={toLocalDateTimeInput(pendingRecord.meal.occurredAt)} onChange={(event) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, occurredAt: fromLocalDateTimeInput(event.target.value) } })} /></label>
+                    </div>
+                    <div className="form-grid coach-record-macros">
+                      <NumberField label="kcal" value={pendingRecord.meal.calories} onChange={(value) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, calories: value } })} />
+                      <NumberField label="Proteína (g)" value={pendingRecord.meal.proteinG} onChange={(value) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, proteinG: value } })} />
+                      <NumberField label="Carbos (g)" value={pendingRecord.meal.carbohydratesG} onChange={(value) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, carbohydratesG: value } })} />
+                      <NumberField label="Grasa (g)" value={pendingRecord.meal.fatG} onChange={(value) => setPendingRecord({ ...pendingRecord, meal: { ...pendingRecord.meal, fatG: value } })} />
+                    </div>
+                    <IonButton size="small" fill="outline" disabled={busy} onClick={() => void stageCoachAction({ type: 'log_meal', meal: pendingRecord.meal }, pendingRecord.source, pendingRecord.preview)}><IonIcon slot="start" icon={refreshOutline} />Recalcular con fuentes</IonButton>
+                  </> : <>
+                    <label className="field"><span>Actividad</span><input value={pendingRecord.workout.title} onChange={(event) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, title: event.target.value } })} /></label>
+                    <div className="form-grid">
+                      <label className="field"><span>Tipo</span><select value={pendingRecord.workout.activityType} onChange={(event) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, activityType: event.target.value as NonNullable<WorkoutSession['activityType']> } })}><option value="cardio">Cardio</option><option value="strength">Fuerza</option><option value="sport">Deporte</option><option value="mobility">Movilidad</option><option value="other">Otra</option></select></label>
+                      <label className="field"><span>Fecha y hora</span><input type="datetime-local" value={toLocalDateTimeInput(pendingRecord.workout.occurredAt)} onChange={(event) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, occurredAt: fromLocalDateTimeInput(event.target.value) } })} /></label>
+                    </div>
+                    <div className="form-grid coach-record-macros">
+                      <NumberField label="Minutos" value={pendingRecord.workout.durationMinutes} min={1} onChange={(value) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, durationMinutes: value } })} />
+                      <NumberField label="kcal activas" value={pendingRecord.workout.caloriesBurned} onChange={(value) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, caloriesBurned: value } })} />
+                      <NumberField label="Esfuerzo (1–10)" value={pendingRecord.workout.perceivedEffort} min={1} max={10} onChange={(value) => setPendingRecord({ ...pendingRecord, workout: { ...pendingRecord.workout, perceivedEffort: value } })} />
+                    </div>
+                  </>}
                   <div>
-                    <IonButton size="small" className="primary-button" onClick={confirmMeal}>
+                    <IonButton size="small" className="primary-button" onClick={confirmPendingRecord}>
                       Confirmar y registrar
                     </IonButton>
-                    <IonButton size="small" fill="clear" color="medium" onClick={() => setPendingMeal(null)}>
+                    <IonButton size="small" fill="clear" color="medium" onClick={() => setPendingRecord(null)}>
                       Descartar
                     </IonButton>
                   </div>
@@ -679,7 +687,7 @@ const Coach = ({ snapshot, healthSummary, voiceBalance, voiceOffers, billingBusy
       <IonActionSheet
         isOpen={photoPickerOpen}
         onDidDismiss={() => setPhotoPickerOpen(false)}
-        header="Añadir foto de alimento"
+        header="Analizar comida o actividad"
         buttons={[
           {
             text: 'Tomar foto',
@@ -732,6 +740,22 @@ function formatCallDuration(totalSeconds: number): string {
     .padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+
+function toLocalDateTimeInput(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function fromLocalDateTimeInput(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function NumberField({ label, value, min = 0, max, onChange }: { label: string; value: number; min?: number; max?: number; onChange(value: number): void }) {
+  return <label className="field"><span>{label}</span><input type="number" inputMode="decimal" min={min} max={max} step="any" value={value} onChange={(event) => onChange(Math.max(min, max === undefined ? Number(event.target.value) || 0 : Math.min(max, Number(event.target.value) || 0)))} /></label>;
 }
 
 function emptyRealtimeUsage(): RealtimeCallUsage {

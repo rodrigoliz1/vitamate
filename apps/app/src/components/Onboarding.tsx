@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { IonButton, IonContent, IonIcon, IonPage } from '@ionic/react';
 import { arrowBack, arrowForward, checkmarkCircle, shieldCheckmark } from 'ionicons/icons';
 import { ageOnDate, type SafetyFlag, type UserProfile } from '@vitamate/domain';
@@ -82,6 +82,7 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
   const [step, setStep] = useState(() => Math.max(0, Math.min(7, initialStep)));
   const [draft, setDraft] = useState<Draft>(() => initialProfile ? draftFromProfile(initialProfile) : INITIAL);
   const [error, setError] = useState('');
+  const contentRef = useRef<HTMLIonContentElement>(null);
   const totalSteps = 8;
 
   const canContinue = useMemo(() => {
@@ -100,13 +101,16 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
       setError(step === 0 ? 'Completa tu nombre y confirma que tienes 18 años o más.' : 'Revisa los campos requeridos para continuar.');
       return;
     }
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setError('');
     setStep((current) => Math.min(totalSteps - 1, current + 1));
+    window.requestAnimationFrame(() => void contentRef.current?.scrollToTop(0));
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!canContinue) return next();
+    (document.activeElement as HTMLElement | null)?.blur?.();
     onComplete({
       fullName: draft.fullName.trim(),
       preferredName: draft.preferredName.trim(),
@@ -141,7 +145,7 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
 
   return (
     <IonPage className="onboarding-page">
-      <IonContent fullscreen>
+      <IonContent ref={contentRef} fullscreen>
         <main className="onboarding-shell">
           <header className="onboarding-header"><BrandMark /><div><span>Paso {step + 1} de {totalSteps}</span>{onExitToAuth && <button type="button" onClick={onExitToAuth}>Iniciar sesión</button>}</div></header>
           <div className="step-track"><span style={{ width: `${((step + 1) / totalSteps) * 100}%` }} /></div>
@@ -151,7 +155,7 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
               <p className="lead">Usaremos tus respuestas para personalizar nutrición, entrenamiento y el estilo de acompañamiento.</p>
               <label className="field"><span>Nombre completo</span><input autoComplete="name" value={draft.fullName} onChange={(e) => setDraft({ ...draft, fullName: e.target.value })} placeholder="Nombre y apellidos" /></label>
               <label className="field"><span>¿Cómo quieres que te llamemos?</span><input autoComplete="given-name" value={draft.preferredName} onChange={(e) => setDraft({ ...draft, preferredName: e.target.value })} placeholder="Tu nombre" /></label>
-              <label className="field"><span>Fecha de nacimiento</span><input type="date" value={draft.dateOfBirth} onChange={(e) => setDraft({ ...draft, dateOfBirth: e.target.value })} /></label>
+              <label className="field"><span>Fecha de nacimiento</span><input type="date" value={draft.dateOfBirth} onInput={(e) => { const value = e.currentTarget.value; setDraft((current) => ({ ...current, dateOfBirth: value })); }} onChange={(e) => { const value = e.currentTarget.value; setDraft((current) => ({ ...current, dateOfBirth: value })); }} /></label>
               <p className="privacy-note"><IonIcon icon={shieldCheckmark} /> VITAMATE está diseñado inicialmente para personas de 18 años o más.</p>
             </section>}
 
@@ -231,7 +235,7 @@ export function Onboarding({ onComplete, onExitToAuth, initialProfile, initialSt
             {error && <p className="form-error" role="alert">{error}</p>}
             <footer className="onboarding-actions">
               {step > 0
-                ? <IonButton type="button" fill="clear" onClick={() => { setError(''); setStep(step - 1); }}><IonIcon slot="start" icon={arrowBack} />Atrás</IonButton>
+                ? <IonButton type="button" fill="clear" onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setError(''); setStep(step - 1); window.requestAnimationFrame(() => void contentRef.current?.scrollToTop(0)); }}><IonIcon slot="start" icon={arrowBack} />Atrás</IonButton>
                 : onExitToAuth && <IonButton type="button" fill="clear" onClick={onExitToAuth}><IonIcon slot="start" icon={arrowBack} />Volver al acceso</IonButton>}
               {step < totalSteps - 1
                 ? <IonButton type="button" className="primary-button" onClick={next}>Continuar<IonIcon slot="end" icon={arrowForward} /></IonButton>

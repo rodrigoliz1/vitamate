@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IonButton, IonContent, IonIcon, IonModal, IonPage, IonRouterLink } from '@ionic/react';
 import { barbellOutline, chatbubbleEllipsesOutline, checkmarkCircle, closeOutline, createOutline, flameOutline, homeOutline, playCircleOutline, timeOutline, trashOutline } from 'ionicons/icons';
 import { buildWeeklyWorkoutBalance, generateStarterWorkoutPlan, sessionsThisWeek, type TrainingEnvironment, type WorkoutDay, type WorkoutExerciseResult, type WorkoutSession } from '@vitamate/domain';
@@ -8,6 +8,7 @@ import { GuidedWorkout, GuidedWorkoutBoundary } from '../components/GuidedWorkou
 import { resolveUiLocale } from '../config/appFeatures';
 import type { VitamateSnapshot } from '../data/localRepository';
 import { exerciseGuideUrls } from '../data/staticMedia';
+import { activeWorkoutRepository, createActiveWorkout, type ActiveWorkoutState } from '../data/activeWorkoutRepository';
 
 interface Props {
   snapshot: VitamateSnapshot;
@@ -27,10 +28,11 @@ interface Props {
 }
 
 const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkout }: Props) => {
-  const [activeDay, setActiveDay] = useState<WorkoutDay | null>(null);
+  const profile = snapshot.profile;
+  const activeProgress = useRef<ActiveWorkoutState | null>(profile ? activeWorkoutRepository.load(profile.completedAt) : null);
+  const [activeDay, setActiveDay] = useState<WorkoutDay | null>(() => activeProgress.current?.day ?? null);
   const guides = exerciseGuideUrls;
   const [editing, setEditing] = useState<WorkoutSession | null>(null);
-  const profile = snapshot.profile;
   const [environment, setEnvironment] = useState<TrainingEnvironment>(() => (profile?.trainingPreference === 'home' ? 'home' : 'gym'));
   const plan = useMemo(() => (profile ? generateStarterWorkoutPlan(profile, new Date(), environment) : snapshot.workoutPlan), [profile, environment, snapshot.workoutPlan]);
   const weekly = sessionsThisWeek(snapshot.workoutSessions);
@@ -54,6 +56,18 @@ const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkou
   const closeWorkout = () => {
     document.body.classList.remove('guided-workout-active');
     setActiveDay(null);
+  };
+  const saveWorkoutProgress = useCallback((progress: ActiveWorkoutState) => {
+    activeProgress.current = progress;
+    activeWorkoutRepository.save(progress);
+  }, []);
+  const startWorkout = (day: WorkoutDay) => {
+    if (!profile) return;
+    const saved = activeWorkoutRepository.load(profile.completedAt);
+    const progress = saved?.day.id === day.id ? saved : createActiveWorkout(day, profile.completedAt);
+    activeProgress.current = progress;
+    activeWorkoutRepository.save(progress);
+    setActiveDay(progress.day);
   };
 
   return (
@@ -151,7 +165,7 @@ const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkou
                       </li>
                     ))}
                   </ol>
-                  <IonButton expand="block" className="primary-button" onClick={() => setActiveDay(day)}>
+                  <IonButton expand="block" className="primary-button" onClick={() => startWorkout(day)}>
                     <IonIcon slot="start" icon={playCircleOutline} />
                     Iniciar entrenamiento
                   </IonButton>
@@ -191,7 +205,19 @@ const Entrenar = ({ snapshot, onCompleteWorkout, onUpdateWorkout, onDeleteWorkou
       {activeDay && profile && (
         <section className="guided-workout-layer" role="dialog" aria-modal="true" aria-label={`Entrenamiento ${activeDay.title}`}>
           <GuidedWorkoutBoundary key={activeDay.id} onExit={closeWorkout}>
-            <GuidedWorkout day={activeDay} profile={profile} history={snapshot.workoutSessions} onExit={closeWorkout} onFinish={(startedAt, duration, results) => onCompleteWorkout(activeDay, startedAt, duration, results)} />
+            <GuidedWorkout
+              day={activeDay}
+              profile={profile}
+              history={snapshot.workoutSessions}
+              initialState={activeProgress.current}
+              onProgress={saveWorkoutProgress}
+              onExit={closeWorkout}
+              onFinish={(startedAt, duration, results) => {
+                activeWorkoutRepository.clear();
+                activeProgress.current = null;
+                onCompleteWorkout(activeDay, startedAt, duration, results);
+              }}
+            />
           </GuidedWorkoutBoundary>
         </section>
       )}

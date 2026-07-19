@@ -1,11 +1,12 @@
 import type { CoachAttachment, CoachContext, CoachLongTermMemory } from './openaiCoach.js';
 
-export type CoachTask = 'general' | 'nutrition' | 'meal_log' | 'training' | 'workout_log' | 'sleep_log' | 'progress' | 'health' | 'plan_change';
+export type CoachTask = 'general' | 'nutrition' | 'meal_log' | 'training' | 'workout_log' | 'photo_log' | 'sleep_log' | 'progress' | 'health' | 'plan_change';
 
 const normalize = (value: string) => value.toLocaleLowerCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 export function classifyCoachTask(message: string, attachment: CoachAttachment = {}, history: Array<{ role: 'user' | 'assistant'; content: string }> = []): CoachTask {
   let text = normalize(message);
+  if (attachment.imageDataUrl) return 'photo_log';
   // Confirmaciones breves como “regístralo” dependen de la última descripción
   // hecha por el usuario. Sólo retomamos texto del usuario, nunca una inferencia
   // del asistente, y únicamente para escoger el esquema de acción.
@@ -60,7 +61,7 @@ export function compactCoachContext(context: CoachContext, task: CoachTask): Rec
     preferredSport: context.profile.preferredSport,
   };
 
-  if (task === 'nutrition' || task === 'meal_log' || task === 'plan_change' || task === 'progress' || task === 'health') {
+  if (task === 'nutrition' || task === 'meal_log' || task === 'photo_log' || task === 'plan_change' || task === 'progress' || task === 'health') {
     base.nutrition = {
       profile: nutritionProfile,
       target: context.nutritionTarget,
@@ -68,7 +69,7 @@ export function compactCoachContext(context: CoachContext, task: CoachTask): Rec
       ...(task === 'progress' ? { week: context.weeklyNutrition, weightTrend: context.weightTrend } : {}),
     };
   }
-  if (task === 'training' || task === 'workout_log' || task === 'progress' || task === 'health') {
+  if (task === 'training' || task === 'workout_log' || task === 'photo_log' || task === 'progress' || task === 'health') {
     base.training = {
       profile: trainingProfile,
       recent: context.recentWorkouts.slice(0, 3),
@@ -124,6 +125,7 @@ export function selectRelevantMemories(message: string, task: CoachTask, memorie
     meal_log: new Set(['preference', 'goal', 'constraint', 'health_context']),
     training: new Set(['goal', 'routine', 'constraint', 'health_context']),
     workout_log: new Set(['goal', 'routine', 'constraint', 'health_context']),
+    photo_log: new Set(['preference', 'goal', 'routine', 'constraint', 'health_context']),
     sleep_log: new Set(['routine', 'health_context', 'constraint']),
     progress: new Set(['goal', 'routine', 'motivation', 'constraint']),
     health: new Set(['health_context', 'constraint', 'routine']),

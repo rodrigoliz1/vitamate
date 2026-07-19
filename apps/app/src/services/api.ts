@@ -410,6 +410,16 @@ export type CoachAction =
       };
     };
 
+export function recalculateCoachMeal(input: {
+  description: string;
+  mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  occurredAt: string;
+  timezone: string;
+  locale: AppLocale;
+}): Promise<{ meal: Extract<CoachAction, { type: 'log_meal' }>['meal']; source: string }> {
+  return request('/v1/coach/recalculate-meal', { method: 'POST', body: JSON.stringify(input) });
+}
+
 export interface CoachReply {
   response: string;
   action: CoachAction | null;
